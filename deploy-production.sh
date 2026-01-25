@@ -316,25 +316,24 @@ setup_ssl() {
 
 # Create environment file
 create_env_file() {
-    log_step "Setting up environment configuration..."
+    log_step "Checking environment configuration..."
     
-    ENV_FILE="$PROJECT_DIR/.env.prod"
+    ENV_FILE="$PROJECT_DIR/.env"
     
-    # Check if .env.prod already exists (shipped with repo or from previous install)
+    # Check if .env already exists
     if [[ -f "$ENV_FILE" ]]; then
-        log_success "Environment file .env.prod found!"
+        log_success "Environment file .env found!"
         log_info "Using existing environment configuration"
         return
     fi
     
-    # Check if .env.prod.example exists
-    if [[ -f "$PROJECT_DIR/.env.prod.example" ]]; then
-        cp "$PROJECT_DIR/.env.prod.example" "$ENV_FILE"
-        log_warning "Created .env.prod from example. Please configure your API keys!"
-    else
-        log_error "No .env.prod or .env.prod.example found!"
-        log_error "Please create .env.prod with your credentials"
-        exit 1
+    log_warning "No .env file found. Please create one with your credentials."
+    log_info "You can copy from backend/.env if available"
+    
+    # Check if backend/.env exists and copy it
+    if [[ -f "$PROJECT_DIR/backend/.env" ]]; then
+        cp "$PROJECT_DIR/backend/.env" "$ENV_FILE"
+        log_success "Copied backend/.env to .env"
     fi
     
     log_success "Environment configuration complete"
@@ -342,7 +341,7 @@ create_env_file() {
 
 # Create nginx configuration
 create_nginx_config() {
-    log_step "Creating Nginx configuration..."
+    log_step "Creating Nginx configuration...""
     
     mkdir -p "$PROJECT_DIR/nginx"
     

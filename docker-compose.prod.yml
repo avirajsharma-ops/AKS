@@ -10,7 +10,7 @@ services:
     container_name: aks-backend
     restart: always
     env_file:
-      - .env.prod
+      - .env
     environment:
       NODE_ENV: production
       PORT: 5001
@@ -49,7 +49,7 @@ services:
     container_name: aks-frontend
     restart: always
     env_file:
-      - .env.prod
+      - .env
     ports:
       - "80:80"
       - "443:443"
