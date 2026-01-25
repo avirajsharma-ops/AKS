@@ -51,3 +51,4 @@ frontend-web/build/
 *.pem
 *.key
 secrets/
+.env.prod

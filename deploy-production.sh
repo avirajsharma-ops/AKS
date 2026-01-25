@@ -320,49 +320,21 @@ create_env_file() {
     
     ENV_FILE="$PROJECT_DIR/.env.prod"
     
+    # Check if .env.prod already exists (shipped with repo or from previous install)
     if [[ -f "$ENV_FILE" ]]; then
-        log_info "Environment file exists. Backing up to .env.prod.backup"
-        cp "$ENV_FILE" "$ENV_FILE.backup"
+        log_success "Environment file .env.prod found!"
+        log_info "Using existing environment configuration"
+        return
     fi
     
     # Check if .env.prod.example exists
     if [[ -f "$PROJECT_DIR/.env.prod.example" ]]; then
-        if [[ ! -f "$ENV_FILE" ]]; then
-            cp "$PROJECT_DIR/.env.prod.example" "$ENV_FILE"
-            log_warning "Created .env.prod from example. Please configure your API keys!"
-        fi
-    fi
-    
-    # Prompt for required variables if not set
-    if [[ -f "$ENV_FILE" ]]; then
-        source "$ENV_FILE"
-        
-        if [[ -z "$OPENAI_API_KEY" || "$OPENAI_API_KEY" == "your-openai-api-key" ]]; then
-            log_warning "OPENAI_API_KEY is not configured in $ENV_FILE"
-            read -p "Enter your OpenAI API key (or press Enter to skip): " api_key
-            if [[ -n "$api_key" ]]; then
-                sed -i "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" "$ENV_FILE"
-            fi
-        fi
-        
-        if [[ -z "$ELEVENLABS_API_KEY" || "$ELEVENLABS_API_KEY" == "your-elevenlabs-api-key" ]]; then
-            log_warning "ELEVENLABS_API_KEY is not configured in $ENV_FILE"
-            read -p "Enter your ElevenLabs API key (or press Enter to skip): " api_key
-            if [[ -n "$api_key" ]]; then
-                sed -i "s|ELEVENLABS_API_KEY=.*|ELEVENLABS_API_KEY=$api_key|" "$ENV_FILE"
-            fi
-        fi
-        
-        if [[ -z "$ELEVENLABS_VOICE_ID" || "$ELEVENLABS_VOICE_ID" == "your-elevenlabs-voice-id" ]]; then
-            log_warning "ELEVENLABS_VOICE_ID is not configured in $ENV_FILE"
-            read -p "Enter your ElevenLabs Voice ID (or press Enter to skip): " voice_id
-            if [[ -n "$voice_id" ]]; then
-                sed -i "s|ELEVENLABS_VOICE_ID=.*|ELEVENLABS_VOICE_ID=$voice_id|" "$ENV_FILE"
-            fi
-        fi
-        
-        # Update domain in env file
-        sed -i "s|DOMAIN=.*|DOMAIN=$DOMAIN|" "$ENV_FILE" 2>/dev/null || echo "DOMAIN=$DOMAIN" >> "$ENV_FILE"
+        cp "$PROJECT_DIR/.env.prod.example" "$ENV_FILE"
+        log_warning "Created .env.prod from example. Please configure your API keys!"
+    else
+        log_error "No .env.prod or .env.prod.example found!"
+        log_error "Please create .env.prod with your credentials"
+        exit 1
     fi
     
     log_success "Environment configuration complete"

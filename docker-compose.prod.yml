@@ -1,5 +1,3 @@
-version: '3.8'
-
 # Production Docker Compose for AKS
 # Ubuntu 24 LTS VPS Deployment
 
@@ -11,16 +9,11 @@ services:
       dockerfile: Dockerfile.prod
     container_name: aks-backend
     restart: always
+    env_file:
+      - .env.prod
     environment:
       NODE_ENV: production
       PORT: 5001
-      MONGODB_URI: ${MONGODB_URI}
-      JWT_SECRET: ${JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
-      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY}
-      ELEVENLABS_VOICE_ID: ${ELEVENLABS_VOICE_ID}
     expose:
       - "5001"
     networks:
@@ -51,10 +44,12 @@ services:
       context: ./frontend-web
       dockerfile: Dockerfile.prod
       args:
-        REACT_APP_API_URL: ${REACT_APP_API_URL:-}
-        REACT_APP_WS_URL: ${REACT_APP_WS_URL:-}
+        REACT_APP_API_URL: https://itsmira.cloud
+        REACT_APP_WS_URL: wss://itsmira.cloud
     container_name: aks-frontend
     restart: always
+    env_file:
+      - .env.prod
     ports:
       - "80:80"
       - "443:443"

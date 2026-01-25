@@ -16,8 +16,8 @@ ENV REACT_APP_WS_URL=$REACT_APP_WS_URL
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci
+# Install dependencies (using npm install for flexibility with lock file)
+RUN npm install --legacy-peer-deps
 
 # Copy source code
 COPY . .
