@@ -2,6 +2,37 @@
 # Ubuntu 24 LTS VPS Deployment
 
 services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7
+    container_name: aks-mongodb
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-akspassword123}
+      MONGO_INITDB_DATABASE: aks
+    volumes:
+      - mongodb_data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - aks-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   # Backend API with PM2 for process management
   backend:
     build:
@@ -14,8 +45,12 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5001
+      MONGODB_URI: mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-akspassword123}@mongodb:27017/aks?authSource=admin
     expose:
       - "5001"
+    depends_on:
+      mongodb:
+        condition: service_healthy
     networks:
       - aks-network
     healthcheck:
@@ -38,18 +73,16 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Frontend with Nginx + SSL
+  # Frontend with Nginx
   frontend:
     build:
       context: ./frontend-web
       dockerfile: Dockerfile.prod
       args:
         REACT_APP_API_URL: /api
-        REACT_APP_WS_URL: wss://itsmira.cloud/ws/audio
+        REACT_APP_WS_URL: wss://${DOMAIN:-itsmira.cloud}/ws/audio
     container_name: aks-frontend
     restart: always
-    env_file:
-      - .env
     ports:
       - "80:80"
       - "443:443"
@@ -81,23 +114,10 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Watchtower for automatic updates (optional)
-  watchtower:
-    image: containrrr/watchtower
-    container_name: aks-watchtower
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      WATCHTOWER_CLEANUP: "true"
-      WATCHTOWER_POLL_INTERVAL: 86400  # Check daily
-      WATCHTOWER_INCLUDE_STOPPED: "false"
-    profiles:
-      - auto-update
+volumes:
+  mongodb_data:
+    driver: local
 
 networks:
   aks-network:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/16
