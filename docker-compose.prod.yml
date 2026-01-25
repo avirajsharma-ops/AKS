@@ -45,7 +45,7 @@ services:
       dockerfile: Dockerfile.prod
       args:
         REACT_APP_API_URL: /api
-        REACT_APP_WS_URL: wss://itsmira.cloud
+        REACT_APP_WS_URL: wss://itsmira.cloud/ws/audio
     container_name: aks-frontend
     restart: always
     env_file:
