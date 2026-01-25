@@ -45,7 +45,7 @@ Return a JSON object with these categories. Only include information explicitly 
       ],
       response_format: { type: 'json_object' },
       temperature: 0.3,
-      max_tokens: 1000
+      max_tokens: 2000
     });
 
     return JSON.parse(response.choices[0].message.content);
@@ -93,7 +93,7 @@ async function generateCloneResponse(userId, prompt, context = {}) {
         }
       ],
       temperature: 0.7,
-      max_tokens: 500
+      max_tokens: 2000
     });
 
     return response.choices[0].message.content;

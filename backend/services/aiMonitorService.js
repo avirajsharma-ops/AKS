@@ -232,7 +232,7 @@ ${JSON.stringify(profileSummary, null, 2)}
       model: 'gpt-4-turbo-preview',
       messages,
       temperature: 0.8,
-      max_tokens: 150
+      max_tokens: 1000
     });
 
     return response.choices[0].message.content;
