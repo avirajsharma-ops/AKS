@@ -34,12 +34,31 @@ class MainActivity : AppCompatActivity() {
     
     companion object {
         private const val TAG = "MainActivity"
+        
+        // ========================================================
+        // IMPORTANT: Choose the right URL for your environment
+        // ========================================================
+        
+        // For LOCAL DEVELOPMENT (run on emulator):
+        // Use 10.0.2.2 which points to host machine's localhost
+        // private const val WEBVIEW_URL = "http://10.0.2.2:80/"
+        
+        // For LOCAL DEVELOPMENT (run on physical device):
+        // Use your computer's local IP address (find with: ifconfig | grep "inet ")
+        // private const val WEBVIEW_URL = "http://192.168.1.XXX:80/"
+        
+        // For PRODUCTION:
         private const val WEBVIEW_URL = "https://itsmira.cloud/"
+        
+        // ========================================================
     }
     
     private lateinit var webView: WebView
     private lateinit var progressBar: ProgressBar
+    private lateinit var errorView: android.widget.LinearLayout
+    private lateinit var errorText: android.widget.TextView
     private var permissionsRequested = false
+    private var hasLoadedSuccessfully = false
     
     // Required permissions
     private val requiredPermissions = mutableListOf(
@@ -168,8 +187,27 @@ class MainActivity : AppCompatActivity() {
     private fun loadWebView() {
         if (!permissionsRequested) {
             permissionsRequested = true
+            hasLoadedSuccessfully = false
+            errorView.visibility = View.GONE
+            webView.visibility = View.VISIBLE
+            progressBar.visibility = View.VISIBLE
+            Log.d(TAG, "Loading WebView URL: $WEBVIEW_URL")
             webView.loadUrl(WEBVIEW_URL)
         }
+    }
+    
+    private fun showErrorPage(errorMessage: String) {
+        runOnUiThread {
+            webView.visibility = View.GONE
+            progressBar.visibility = View.GONE
+            errorView.visibility = View.VISIBLE
+            errorText.text = "Unable to load AKS\n\n$errorMessage\n\nMake sure:\n• You have internet connection\n• The server is running\n• The URL is correct: $WEBVIEW_URL"
+        }
+    }
+    
+    private fun retryLoad() {
+        permissionsRequested = false
+        loadWebView()
     }
     
     private fun setupFullscreenMode() {
@@ -199,9 +237,48 @@ class MainActivity : AppCompatActivity() {
             max = 100
         }
         
+        // Create error text view
+        errorText = android.widget.TextView(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+            setTextColor(android.graphics.Color.WHITE)
+            textSize = 16f
+            gravity = android.view.Gravity.CENTER
+            setPadding(48, 24, 48, 24)
+        }
+        
+        // Create retry button
+        val retryButton = android.widget.Button(this).apply {
+            layoutParams = android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = 32
+            }
+            text = "Retry"
+            setOnClickListener { retryLoad() }
+        }
+        
+        // Create error view container
+        errorView = android.widget.LinearLayout(this).apply {
+            layoutParams = android.widget.FrameLayout.LayoutParams(
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
+                android.widget.FrameLayout.LayoutParams.MATCH_PARENT
+            )
+            orientation = android.widget.LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            setBackgroundColor(android.graphics.Color.BLACK)
+            visibility = View.GONE
+            addView(errorText)
+            addView(retryButton)
+        }
+        
         val container = android.widget.FrameLayout(this).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             addView(webView)
+            addView(errorView)
             addView(progressBar)
         }
         
@@ -232,17 +309,44 @@ class MainActivity : AppCompatActivity() {
                 override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
                     super.onPageStarted(view, url, favicon)
                     progressBar.visibility = View.VISIBLE
+                    Log.d(TAG, "Page started loading: $url")
                 }
                 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     progressBar.visibility = View.GONE
+                    if (!hasLoadedSuccessfully) {
+                        hasLoadedSuccessfully = true
+                        Log.d(TAG, "Page loaded successfully: $url")
+                    }
                     injectNativeDetectionScript()
                 }
                 
                 override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
                     super.onReceivedError(view, request, error)
-                    Log.e(TAG, "WebView error: ${error?.description}")
+                    val errorCode = error?.errorCode ?: -1
+                    val errorDesc = error?.description?.toString() ?: "Unknown error"
+                    val isMainFrame = request?.isForMainFrame == true
+                    
+                    Log.e(TAG, "WebView error: code=$errorCode, desc=$errorDesc, mainFrame=$isMainFrame, url=${request?.url}")
+                    
+                    // Only show error page for main frame errors
+                    if (isMainFrame) {
+                        showErrorPage("Error $errorCode: $errorDesc")
+                    }
+                }
+                
+                override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: android.webkit.WebResourceResponse?) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    val statusCode = errorResponse?.statusCode ?: -1
+                    val isMainFrame = request?.isForMainFrame == true
+                    
+                    Log.e(TAG, "HTTP error: statusCode=$statusCode, mainFrame=$isMainFrame, url=${request?.url}")
+                    
+                    // Show error for significant main frame HTTP errors
+                    if (isMainFrame && statusCode >= 400) {
+                        showErrorPage("HTTP Error $statusCode")
+                    }
                 }
                 
                 override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
