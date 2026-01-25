@@ -17,17 +17,18 @@ echo -e "${GREEN}=== AKS Quick Redeploy ===${NC}"
 # Change to script directory
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-# Stop existing containers
+# Stop existing containers (but keep network and volumes)
 echo -e "${YELLOW}Stopping existing containers...${NC}"
-docker compose -f docker-compose.prod.yml down || true
+docker compose -f docker-compose.prod.yml stop frontend backend || true
+docker compose -f docker-compose.prod.yml rm -f frontend backend || true
 
 # Rebuild images without cache
 echo -e "${YELLOW}Rebuilding images...${NC}"
-docker compose -f docker-compose.prod.yml build --no-cache
+docker compose -f docker-compose.prod.yml build --no-cache frontend backend
 
 # Start containers
 echo -e "${YELLOW}Starting containers...${NC}"
-docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml up -d frontend backend
 
 # Wait for health checks
 echo -e "${YELLOW}Waiting for services to be healthy...${NC}"
@@ -39,7 +40,7 @@ docker compose -f docker-compose.prod.yml ps
 
 # Show logs
 echo -e "${GREEN}=== Recent Logs ===${NC}"
-docker compose -f docker-compose.prod.yml logs --tail=20
+docker compose -f docker-compose.prod.yml logs --tail=20 frontend backend
 
 echo -e "${GREEN}=== Redeploy Complete ===${NC}"
 echo -e "Test the site: curl -I http://localhost/"
