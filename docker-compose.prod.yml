@@ -44,7 +44,7 @@ services:
       context: ./frontend-web
       dockerfile: Dockerfile.prod
       args:
-        REACT_APP_API_URL: https://itsmira.cloud
+        REACT_APP_API_URL: /api
         REACT_APP_WS_URL: wss://itsmira.cloud
     container_name: aks-frontend
     restart: always
