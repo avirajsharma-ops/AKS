@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.AKS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Primary brand color - Pure Black -->
+        <item name="colorPrimary">@color/black</item>
+        <item name="colorPrimaryVariant">@color/black</item>
+        <item name="colorOnPrimary">@color/white</item>
+        
+        <!-- Secondary brand color -->
+        <item name="colorSecondary">@color/accent</item>
+        <item name="colorSecondaryVariant">@color/accent_dark</item>
+        <item name="colorOnSecondary">@color/white</item>
+        
+        <!-- Status bar - Pure Black -->
+        <item name="android:statusBarColor">@color/black</item>
+        <item name="android:navigationBarColor">@color/black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        
+        <!-- Background - Pure Black -->
+        <item name="android:windowBackground">@color/black</item>
+        <item name="android:colorBackground">@color/black</item>
+        
+        <!-- Splash screen - Pure Black -->
+        <item name="android:windowSplashScreenBackground">@color/black</item>
+    </style>
+    
+    <!-- Splash Screen Theme -->
+    <style name="Theme.AKS.Splash" parent="Theme.AKS">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+</resources>
