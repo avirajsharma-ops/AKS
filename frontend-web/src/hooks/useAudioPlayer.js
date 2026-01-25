@@ -6,6 +6,32 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import wsService from '../services/websocket';
 
+// Global audio context unlock state
+let audioUnlocked = false;
+let silentAudio = null;
+
+// Unlock audio on first user interaction
+const unlockAudio = () => {
+  if (audioUnlocked) return;
+  
+  // Create and play silent audio to unlock
+  silentAudio = new Audio('data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4LjI5LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWGluZwAAAA8AAAACAAABhgC7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7//////////////////////////////////////////////////////////////////8AAAAATGF2YzU4LjU0AAAAAAAAAAAAAAAAJAAAAAAAAAAAAYYoRwmHAAAAAAD/+9DEAAAIAAaX9AAALgAANIAAAAQAAAaQAAAAgAZBkGQZAAACYJg+D4Pg+D4PnAcBwfB8HwfB8HwIAgCAIAgAAABkGQZBkAAAJg+D4Pg+D4Pg+cBwHB8HwfB8HwfAgCAIAgCAIA//tQxBCAAADSAAAAAAAAANIAAAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==');
+  silentAudio.volume = 0.01;
+  silentAudio.play().then(() => {
+    audioUnlocked = true;
+    console.log('🔓 Audio unlocked for autoplay');
+  }).catch(() => {
+    // Still locked, will try again on next interaction
+  });
+};
+
+// Add listeners for user interaction
+if (typeof window !== 'undefined') {
+  ['click', 'touchstart', 'keydown'].forEach(event => {
+    document.addEventListener(event, unlockAudio, { once: false, passive: true });
+  });
+}
+
 export const useAudioPlayer = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -66,12 +92,31 @@ export const useAudioPlayer = () => {
           // Emit event for echo cancellation
           wsService.emit('ai:speaking:start');
           console.log('🔊 AI speaking - pausing mic');
-          audio.play().catch(err => {
-            console.error('Audio play error:', err);
-            setIsPlaying(false);
-            wsService.emit('ai:speaking:end');
-            resolve();
-          });
+          
+          // Try to play, with retry on user gesture
+          const tryPlay = () => {
+            audio.play().then(() => {
+              console.log('▶️ Audio playing');
+            }).catch(err => {
+              if (err.name === 'NotAllowedError') {
+                console.log('⏸️ Audio blocked - waiting for user interaction');
+                // Wait for user interaction then retry
+                const retryPlay = () => {
+                  audio.play().catch(() => {});
+                  document.removeEventListener('click', retryPlay);
+                  document.removeEventListener('touchstart', retryPlay);
+                };
+                document.addEventListener('click', retryPlay, { once: true });
+                document.addEventListener('touchstart', retryPlay, { once: true });
+              } else {
+                console.error('Audio play error:', err);
+                setIsPlaying(false);
+                wsService.emit('ai:speaking:end');
+                resolve();
+              }
+            });
+          };
+          tryPlay();
         };
         
         audio.onended = () => {

@@ -19,6 +19,7 @@ export function useAudioRecorder() {
   const autoStartedRef = useRef(false);
   const restartTimeoutRef = useRef(null);
   const isListeningRef = useRef(false); // Track listening state for callbacks
+  const autoFinalizeTimeoutRef = useRef(null); // Timer to auto-finalize interim text
 
   // Check if Web Speech API is supported
   const isSupported = useCallback(() => {
@@ -89,6 +90,11 @@ export function useAudioRecorder() {
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
       restartTimeoutRef.current = null;
+    }
+    
+    if (autoFinalizeTimeoutRef.current) {
+      clearTimeout(autoFinalizeTimeoutRef.current);
+      autoFinalizeTimeoutRef.current = null;
     }
     
     if (recognitionRef.current) {
@@ -188,6 +194,12 @@ export function useAudioRecorder() {
             
             console.log(`✅ Final: "${exactText}" (Chrome gave: "${text}", interim was: "${lastInterimRef.current}")`);
             lastInterimRef.current = '';
+            
+            // Clear auto-finalize timer since we got a real final
+            if (autoFinalizeTimeoutRef.current) {
+              clearTimeout(autoFinalizeTimeoutRef.current);
+              autoFinalizeTimeoutRef.current = null;
+            }
           } else {
             // Always store the latest interim text
             lastInterimRef.current = text;
@@ -209,6 +221,38 @@ export function useAudioRecorder() {
               timestamp: Date.now()
             });
           }
+          
+          // Auto-finalize interim text after 1.5s of no new speech
+          // This fixes Chrome's slow finalization for Hindi/Hinglish
+          if (autoFinalizeTimeoutRef.current) {
+            clearTimeout(autoFinalizeTimeoutRef.current);
+          }
+          autoFinalizeTimeoutRef.current = setTimeout(() => {
+            const textToFinalize = lastInterimRef.current;
+            if (textToFinalize && textToFinalize.trim()) {
+              console.log('⏱️ Auto-finalizing after silence:', textToFinalize);
+              lastInterimRef.current = '';
+              setInterimTranscript('');
+              setTranscript(prev => (prev + ' ' + textToFinalize.trim()).trim());
+              
+              const lang = detectLanguageFromText(textToFinalize);
+              setDetectedLanguage(lang === 'hi-IN' ? 'Hindi' : 'English');
+              
+              // Send auto-finalized text to backend
+              if (wsService.isConnected) {
+                wsService.send({
+                  type: 'transcript',
+                  text: textToFinalize.trim(),
+                  language: lang,
+                  isFinal: true,
+                  autoFinalized: true,
+                  timestamp: Date.now()
+                });
+                console.log('📤 Auto-sent to backend:', textToFinalize.trim());
+              }
+            }
+            autoFinalizeTimeoutRef.current = null;
+          }, 1500); // 1.5 seconds of silence
         }
         
         // Only send if we have NEW final text (not previously processed)
