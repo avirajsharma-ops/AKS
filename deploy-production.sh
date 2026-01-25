@@ -295,14 +295,14 @@ setup_ssl() {
                 --domains "$DOMAIN"
         }
     
-    # Create SSL directory for nginx
-    mkdir -p "$PROJECT_DIR/ssl"
+    # Create SSL directory for nginx (matching docker-compose volume mount)
+    mkdir -p "$PROJECT_DIR/docker/ssl"
     
     # Copy certificates
     if [[ -d "/etc/letsencrypt/live/$DOMAIN" ]]; then
-        cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$PROJECT_DIR/ssl/"
-        cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$PROJECT_DIR/ssl/"
-        chmod 600 "$PROJECT_DIR/ssl/"*.pem
+        cp "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" "$PROJECT_DIR/docker/ssl/"
+        cp "/etc/letsencrypt/live/$DOMAIN/privkey.pem" "$PROJECT_DIR/docker/ssl/"
+        chmod 600 "$PROJECT_DIR/docker/ssl/"*.pem
         log_success "SSL certificates installed"
     else
         log_error "SSL certificates not found at /etc/letsencrypt/live/$DOMAIN"
@@ -310,7 +310,7 @@ setup_ssl() {
     fi
     
     # Setup auto-renewal cron job
-    (crontab -l 2>/dev/null | grep -v certbot; echo "0 3 * * * certbot renew --quiet --post-hook 'docker compose -f $PROJECT_DIR/docker-compose.prod.yml restart nginx'") | crontab -
+    (crontab -l 2>/dev/null | grep -v certbot; echo "0 3 * * * certbot renew --quiet --post-hook 'cp /etc/letsencrypt/live/$DOMAIN/*.pem $PROJECT_DIR/docker/ssl/ && docker compose -f $PROJECT_DIR/docker-compose.prod.yml restart frontend'") | crontab -
     log_info "SSL auto-renewal cron job configured"
 }
 
