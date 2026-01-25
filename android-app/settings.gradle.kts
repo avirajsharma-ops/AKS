@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AKS"
+rootProject.name = "Mira"
 include(":app")

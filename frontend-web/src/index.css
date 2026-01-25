@@ -5,9 +5,9 @@
 }
 
 :root {
-  --bg-primary: #0f0f1a;
-  --bg-secondary: #1a1a2e;
-  --bg-tertiary: #252540;
+  --bg-primary: #000000;
+  --bg-secondary: #0a0a0a;
+  --bg-tertiary: #111111;
   --text-primary: #ffffff;
   --text-secondary: #a0a0b0;
   --accent-primary: #6366f1;
@@ -15,7 +15,7 @@
   --success: #10b981;
   --warning: #f59e0b;
   --error: #ef4444;
-  --border: #2d2d44;
+  --border: #222222;
 }
 
 body {

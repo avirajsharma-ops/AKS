@@ -93,6 +93,10 @@ export const useAudioPlayer = () => {
           wsService.emit('ai:speaking:start');
           console.log('🔊 AI speaking - pausing mic');
           
+          // Notify backend that audio is playing (includes duration to pause timeout)
+          const audioDuration = audio.duration ? Math.ceil(audio.duration * 1000) : (audioData.durationMs || 5000);
+          wsService.notifyAudioPlaying(audioDuration);
+          
           // Try to play, with retry on user gesture
           const tryPlay = () => {
             audio.play().then(() => {
@@ -123,6 +127,8 @@ export const useAudioPlayer = () => {
           setIsPlaying(false);
           // Emit event to resume listening
           wsService.emit('ai:speaking:end');
+          // Notify backend audio finished
+          wsService.notifyAudioEnded();
           console.log('🔇 AI finished - resuming mic');
           URL.revokeObjectURL(url);
           resolve();

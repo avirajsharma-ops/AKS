@@ -1,36 +1,18 @@
-<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
-    android:viewportHeight="108"
-    android:tint="@color/white">
-    
-    <!-- AKS Logo - Stylized AI Brain with Sound Waves -->
-    <group android:translateX="27" android:translateY="27">
-        <!-- Central Circle (Brain/AI Core) -->
+    android:viewportHeight="108">
+    <group android:scaleX="0.4"
+        android:scaleY="0.4"
+        android:translateX="32.4"
+        android:translateY="32.4">
+        <!-- M letter stylized -->
         <path
-            android:fillColor="@color/accent"
-            android:pathData="M27,27m-18,0a18,18 0,1 1,36 0a18,18 0,1 1,-36 0"/>
-        
-        <!-- Inner AI Symbol -->
+            android:fillColor="#6366F1"
+            android:pathData="M54,10C30.3,10 11,29.3 11,53s19.3,43 43,43s43,-19.3 43,-43S77.7,10 54,10zM54,86c-18.2,0 -33,-14.8 -33,-33s14.8,-33 33,-33s33,14.8 33,33S72.2,86 54,86z"/>
         <path
-            android:fillColor="@color/white"
-            android:pathData="M27,16c-6.07,0 -11,4.93 -11,11s4.93,11 11,11 11,-4.93 11,-11S33.07,16 27,16zM27,35c-4.41,0 -8,-3.59 -8,-8s3.59,-8 8,-8 8,3.59 8,8 -3.59,8 -8,8z"/>
-        
-        <!-- Microphone Icon in Center -->
-        <path
-            android:fillColor="@color/white"
-            android:pathData="M27,20c-1.66,0 -3,1.34 -3,3v6c0,1.66 1.34,3 3,3s3,-1.34 3,-3v-6c0,-1.66 -1.34,-3 -3,-3zM31.3,27c0,2.5 -2.12,4.25 -4.3,4.25S22.7,29.5 22.7,27H21c0,2.84 2.27,5.19 5,5.56V35h2v-2.44c2.73,-0.37 5,-2.72 5,-5.56h-1.7z"/>
-        
-        <!-- Sound Waves - Left -->
-        <path
-            android:fillColor="@color/accent_light"
-            android:pathData="M8,27c0,-5.25 2.13,-10 5.57,-13.43l-1.41,-1.41C8.39,15.93 6,21.19 6,27s2.39,11.07 6.16,14.84l1.41,-1.41C10.13,37 8,32.25 8,27z"/>
-        
-        <!-- Sound Waves - Right -->
-        <path
-            android:fillColor="@color/accent_light"
-            android:pathData="M46,27c0,5.25 -2.13,10 -5.57,13.43l1.41,1.41C45.61,38.07 48,32.81 48,27s-2.39,-11.07 -6.16,-14.84l-1.41,1.41C43.87,17 46,21.75 46,27z"/>
+            android:fillColor="#6366F1"
+            android:pathData="M40,68V40l14,14l14,-14v28h-6V52l-8,8l-8,-8v16H40z"/>
     </group>
 </vector>

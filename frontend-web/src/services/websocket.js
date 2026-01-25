@@ -181,6 +181,16 @@ class WebSocketService {
     this.sendCommand('resume');
   }
 
+  // Notify backend that AI audio is playing (to pause silence timeout)
+  notifyAudioPlaying(durationMs) {
+    this.sendCommand('audio_playing', { durationMs });
+  }
+
+  // Notify backend that AI audio finished (to resume silence timeout)
+  notifyAudioEnded() {
+    this.sendCommand('audio_ended');
+  }
+
   // Send text as speech input
   speak(text) {
     this.sendCommand('speak', { text });

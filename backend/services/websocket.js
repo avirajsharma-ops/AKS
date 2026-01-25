@@ -353,6 +353,29 @@ async function handleCommand(state, message) {
       }
       break;
     
+    case 'audio_playing':
+      // Frontend is playing AI audio - pause conversation timeout
+      if (state.mode === 'conversation' && conversationTimeouts.has(state.sessionId)) {
+        console.log(`⏸️ Audio playing on frontend (${message.durationMs}ms) - pausing timeout`);
+        clearTimeout(conversationTimeouts.get(state.sessionId));
+        // Set a longer timeout that accounts for the audio duration
+        const extendedTimeout = (message.durationMs || 5000) + CONVERSATION_SILENCE_TIMEOUT_MS;
+        const timeoutId = setTimeout(() => {
+          exitConversationMode(state, 'timeout');
+        }, extendedTimeout);
+        conversationTimeouts.set(state.sessionId, timeoutId);
+        state.lastActivityTime = Date.now();
+      }
+      break;
+    
+    case 'audio_ended':
+      // Frontend finished playing AI audio - restart normal timeout
+      if (state.mode === 'conversation') {
+        console.log(`▶️ Audio ended on frontend - starting ${CONVERSATION_SILENCE_TIMEOUT_MS}ms silence timeout`);
+        resetConversationTimeout(state, 0);
+      }
+      break;
+    
     case 'get_mode':
       // Get current mode
       state.ws.send(JSON.stringify({
@@ -946,7 +969,7 @@ async function exitConversationMode(state, reason = 'timeout') {
   
   // Brief acknowledgment (no long goodbye to keep it snappy)
   if (reason === 'timeout') {
-    const goodbye = "I'm listening.";
+    const goodbye = "I'm going to sleep now, but I'm still listening everything to study you better ! To wake me up, call my name or just say 'Buddy' ";
     state.ws.send(JSON.stringify({
       type: 'ai_response',
       text: goodbye,

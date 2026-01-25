@@ -1,0 +1,929 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=0" />
+  <title>Globe to Face Dot Morph</title>
+  <style>
+    html, body { margin:0; height:100%; overflow:hidden; background:#000; font-family:system-ui,Segoe UI,Roboto,Arial; }
+    canvas { width:100vw; height:100vh; display:block; }
+    video { display:none; }
+
+    /* All UI elements hidden for clean particle-only view */
+  </style>
+</head>
+<body>
+  <video id="video" playsinline muted></video>
+  <canvas id="c"></canvas>
+
+
+
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+
+  <script>
+  (function(){
+    // Clean particle-only view - no UI elements
+
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d', { alpha: false });
+
+    const video = document.getElementById('video');
+    let stream = null;
+    let facingMode = 'user';
+
+    let faceMesh = null;
+    const LM_COUNT = 468;
+    let lastLandmarks = null;
+    let hasFace = false;
+    let lastSeen = 0;
+
+    // 0 globe -> 1 face
+    let faceBlend = 0;
+    const BLEND_IN  = 0.08;  // Slower blend for smoother transition
+    const BLEND_OUT = 0.06;
+
+    // Transition phases: 'stable', 'oscillate', 'disperse'
+    let transitionPhase = 'stable';
+    let phaseTime = 0;
+    let lastPhaseUpdate = performance.now();
+    
+    // Oscillation/chaos parameters - VIGOROUS!
+    let chaosAmount = 0;
+    const CHAOS_BUILD_SPEED = 0.06;   // How fast chaos builds up
+    const CHAOS_DECAY_SPEED = 0.02;   // How fast chaos decays
+    const MAX_CHAOS = 1.0;
+    const OSCILLATION_FREQ = 12;      // Frequency of oscillation
+    const OSCILLATION_AMP = 150;      // Max amplitude in pixels - MUCH BIGGER
+    
+    // Dispersion parameters - FAR DISPLACED!
+    let disperseAmount = 0;
+    const DISPERSE_BUILD_SPEED = 0.07;
+    const DISPERSE_DECAY_SPEED = 0.025;
+    const MAX_DISPERSE = 1.0;
+    const DISPERSE_RADIUS = 350;      // How far particles disperse - MUCH FARTHER
+
+    let W=0,H=0,DPR=1,CX=0,CY=0;
+    let videoAspect = 4/3; // Will be updated when video loads
+    
+    function resize(){
+      DPR = Math.max(1, window.devicePixelRatio || 1);
+      W = window.innerWidth; H = window.innerHeight;
+      canvas.width = Math.floor(W * DPR);
+      canvas.height = Math.floor(H * DPR);
+      canvas.style.width = W+'px';
+      canvas.style.height = H+'px';
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.scale(DPR, DPR);
+      CX = W/2; CY = H/2;
+    }
+    window.addEventListener('resize', resize);
+    
+    // Update video aspect ratio when metadata loads
+    video.addEventListener('loadedmetadata', () => {
+      if (video.videoWidth && video.videoHeight) {
+        videoAspect = video.videoWidth / video.videoHeight;
+      }
+    });
+
+    // --- Config
+    const cfg = {
+      particleCount: 7000,
+      sphereRadiusFrac: 0.33,
+      rotationSpeed: 0.22,
+      perspective: 950,
+
+      dotMin: 0.35,
+      dotMax: 0.95,
+
+      follow: 0.28,
+      followFaceBoost: 0.12,
+
+      // Face sizing with proper aspect ratio
+      faceWidthFrac: 0.38,
+      facePad: 1.05,
+
+      centerSmoothing: 0.25,
+      rotSmoothing: 0.18,
+      rotAmount: 0.55
+    };
+
+    // Hot landmarks for visual emphasis
+    const HOT = new Set([
+      // lips
+      61,146,91,181,84,17,314,405,321,375,291, 78,95,88,178,87,14,317,402,318,324,308,
+      // eyes
+      33,133,159,145,263,362,386,374,
+      // brows
+      70,63,105,66,107,300,293,334,296,336,
+      // nose
+      1,2,4,5,6,19,168,197,195,94,164
+    ]);
+
+    const EXTRA_HOT = new Set([61,291,13,14,33,263,159,145,386,374,1,4,168]);
+
+    // Complete symmetric face mesh - comprehensive coverage with mirrored triangles
+    // MediaPipe symmetric landmark pairs (left, right)
+    const SYMMETRIC_PAIRS = [
+      [234, 454], [127, 356], [162, 389], [21, 301], [54, 284], [103, 332], [67, 297], [109, 338],
+      [93, 323], [132, 361], [58, 288], [172, 397], [136, 367], [150, 379], [149, 378], [176, 400],
+      [148, 377], [152, 152], // chin center
+      [33, 263], [246, 466], [161, 388], [160, 387], [159, 386], [158, 385], [157, 384], [173, 398],
+      [133, 362], [155, 382], [154, 381], [153, 380], [145, 374], [144, 373], [163, 390], [7, 249],
+      [70, 300], [63, 293], [105, 334], [66, 296], [107, 336], [55, 285], [65, 295], [52, 282], [53, 283],
+      [46, 276], [124, 353], [35, 265], [111, 340], [117, 346], [118, 347], [119, 348], [120, 349],
+      [100, 329], [126, 355], [47, 277], [121, 350], [114, 343], [128, 357], [245, 464], [193, 417],
+      [122, 351], [196, 419], [3, 248], [51, 281], [48, 278], [115, 344], [220, 440], [45, 275],
+      [4, 4], // nose tip center
+      [64, 294], [19, 218], [1, 1], [2, 2], [98, 327], [97, 326], [168, 168], [6, 6],
+      [195, 195], [5, 5], [197, 197], [236, 456], [174, 399], [198, 420], [209, 429], [199, 421],
+      [175, 396], [171, 391],
+      [61, 291], [146, 375], [91, 321], [181, 405], [84, 314], [17, 17], // mouth center top
+      [0, 0], [267, 267], // center points
+      [78, 308], [191, 415], [80, 310], [81, 311], [82, 312], [13, 13], [14, 14], // mouth inner centers
+      [95, 324], [88, 318], [178, 402], [87, 317], 
+      [37, 267], [39, 269], [40, 270], [185, 409],
+      [36, 266], [205, 425], [206, 426], [207, 427], [216, 436], [212, 432], [202, 422], [57, 287],
+      [186, 410], [92, 322], [165, 391], [167, 393], [164, 392], [393, 164],
+      [182, 406], [83, 313], [18, 18], // center bottom lip
+      [147, 376], [187, 411], [213, 433], [192, 416], [214, 434], [210, 430], [211, 431], [32, 262]
+    ];
+    
+    // Comprehensive face triangles covering the entire face surface
+    const FACE_TRIANGLES = [
+      // ===== FOREHEAD - top section =====
+      [10, 109, 67], [10, 67, 103], [10, 103, 54], [10, 54, 21], [10, 21, 162],
+      [10, 338, 297], [10, 297, 332], [10, 332, 284], [10, 284, 301], [10, 301, 389],
+      [109, 69, 67], [338, 299, 297],
+      [67, 69, 104], [297, 299, 333],
+      [67, 104, 103], [297, 333, 332],
+      [103, 104, 68], [332, 333, 298],
+      [103, 68, 54], [332, 298, 284],
+      [54, 68, 63], [284, 298, 293],
+      [54, 63, 21], [284, 293, 301],
+      [21, 63, 70], [301, 293, 300],
+      [21, 70, 162], [301, 300, 389],
+      [162, 70, 139], [389, 300, 368],
+      
+      // ===== FOREHEAD - middle =====
+      [69, 108, 104], [299, 337, 333],
+      [104, 108, 151], [333, 337, 151],
+      [104, 151, 68], [333, 151, 298],
+      [68, 151, 71], [298, 151, 301],
+      [68, 71, 63], [298, 301, 293],
+      [63, 71, 70], [293, 301, 300],
+      [70, 71, 139], [300, 301, 368],
+      
+      // ===== TEMPLES & UPPER CHEEKS =====
+      [162, 139, 127], [389, 368, 356],
+      [127, 139, 34], [356, 368, 264],
+      [127, 34, 227], [356, 264, 447],
+      [227, 34, 143], [447, 264, 372],
+      [227, 143, 116], [447, 372, 345],
+      [116, 143, 111], [345, 372, 340],
+      [116, 111, 117], [345, 340, 346],
+      [117, 111, 118], [346, 340, 347],
+      [118, 111, 119], [347, 340, 348],
+      [119, 111, 120], [348, 340, 349],
+      
+      // ===== LEFT EYE REGION =====
+      // Eye socket outer
+      [33, 246, 161], [33, 161, 160], [33, 160, 159], [33, 159, 158], [33, 158, 157],
+      [33, 157, 173], [33, 173, 133], [33, 133, 155], [33, 155, 154], [33, 154, 153],
+      [33, 153, 145], [33, 145, 144], [33, 144, 163], [33, 163, 7], [33, 7, 246],
+      // Around left eye
+      [246, 7, 163], [163, 144, 145], [145, 153, 154], [154, 155, 133],
+      [133, 173, 157], [157, 158, 159], [159, 160, 161], [161, 246, 7],
+      // Left eyebrow area
+      [70, 63, 105], [63, 68, 105], [68, 104, 105], [104, 69, 108],
+      [105, 66, 107], [107, 55, 65], [65, 52, 53], [53, 46, 124],
+      
+      // ===== RIGHT EYE REGION =====
+      // Eye socket outer
+      [263, 466, 388], [263, 388, 387], [263, 387, 386], [263, 386, 385], [263, 385, 384],
+      [263, 384, 398], [263, 398, 362], [263, 362, 382], [263, 382, 381], [263, 381, 380],
+      [263, 380, 374], [263, 374, 373], [263, 373, 390], [263, 390, 249], [263, 249, 466],
+      // Around right eye
+      [466, 249, 390], [390, 373, 374], [374, 380, 381], [381, 382, 362],
+      [362, 398, 384], [384, 385, 386], [386, 387, 388], [388, 466, 249],
+      // Right eyebrow area
+      [300, 293, 334], [293, 298, 334], [298, 333, 334], [333, 299, 337],
+      [334, 296, 336], [336, 285, 295], [295, 282, 283], [283, 276, 353],
+      
+      // ===== NOSE =====
+      // Nose bridge
+      [6, 168, 197], [6, 197, 195], [6, 195, 5], [5, 4, 1], [1, 2, 98], [1, 98, 327], [1, 327, 2],
+      [168, 6, 122], [168, 122, 196], [168, 196, 3], [168, 3, 248], [168, 248, 419], [168, 419, 351], [168, 351, 6],
+      // Nose sides
+      [122, 6, 188], [351, 6, 412],
+      [188, 6, 114], [412, 6, 343],
+      [114, 6, 217], [343, 6, 437],
+      [217, 6, 198], [437, 6, 420],
+      // Nose tip area
+      [4, 5, 51], [4, 51, 45], [4, 45, 275], [4, 275, 281], [4, 281, 5],
+      [51, 5, 195], [281, 5, 195],
+      [45, 51, 134], [275, 281, 363],
+      [134, 51, 220], [363, 281, 440],
+      [220, 51, 48], [440, 281, 278],
+      [48, 51, 115], [278, 281, 344],
+      // Nose wings
+      [102, 48, 64], [331, 278, 294],
+      [64, 48, 219], [294, 278, 439],
+      [219, 48, 218], [439, 278, 438],
+      [218, 48, 79], [438, 278, 309],
+      
+      // ===== CHEEKS - LEFT =====
+      // Upper cheek
+      [116, 117, 123], [116, 123, 50], [50, 123, 101], [101, 123, 36],
+      [36, 123, 47], [36, 47, 126], [126, 47, 100], [100, 47, 121],
+      [121, 47, 114], [114, 47, 188],
+      // Middle cheek  
+      [50, 101, 36], [36, 101, 206], [206, 101, 207], [207, 101, 187],
+      [187, 101, 147], [147, 101, 213], [213, 101, 192], [192, 101, 214],
+      // Lower cheek
+      [132, 93, 234], [132, 234, 127], [132, 127, 162],
+      [132, 162, 21], [132, 21, 54], [132, 54, 103],
+      [58, 132, 172], [172, 132, 136], [136, 132, 150],
+      [150, 132, 149], [149, 132, 176], [176, 132, 148],
+      
+      // ===== CHEEKS - RIGHT =====
+      // Upper cheek
+      [345, 346, 352], [345, 352, 280], [280, 352, 330], [330, 352, 266],
+      [266, 352, 277], [266, 277, 355], [355, 277, 329], [329, 277, 350],
+      [350, 277, 343], [343, 277, 412],
+      // Middle cheek
+      [280, 330, 266], [266, 330, 426], [426, 330, 427], [427, 330, 411],
+      [411, 330, 376], [376, 330, 433], [433, 330, 416], [416, 330, 434],
+      // Lower cheek
+      [361, 323, 454], [361, 454, 356], [361, 356, 389],
+      [361, 389, 301], [361, 301, 284], [361, 284, 332],
+      [288, 361, 397], [397, 361, 367], [367, 361, 379],
+      [379, 361, 378], [378, 361, 400], [400, 361, 377],
+      
+      // ===== MOUTH REGION =====
+      // Upper lip outer
+      [61, 185, 40], [40, 185, 39], [39, 185, 37], [37, 185, 0],
+      [291, 409, 270], [270, 409, 269], [269, 409, 267], [267, 409, 0],
+      [0, 37, 267], [37, 39, 269], [39, 40, 270],
+      // Upper lip middle
+      [37, 0, 267], [0, 11, 267], [0, 12, 11], [267, 11, 302],
+      [61, 40, 39], [291, 270, 269],
+      // Lower lip outer  
+      [61, 146, 91], [91, 146, 181], [181, 146, 84], [84, 146, 17],
+      [291, 375, 321], [321, 375, 405], [405, 375, 314], [314, 375, 17],
+      [17, 84, 314], [84, 181, 405], [181, 91, 321],
+      // Upper lip inner
+      [78, 191, 80], [80, 191, 81], [81, 191, 82], [82, 191, 13],
+      [308, 415, 310], [310, 415, 311], [311, 415, 312], [312, 415, 13],
+      [13, 82, 312],
+      // Lower lip inner
+      [78, 95, 88], [88, 95, 178], [178, 95, 87], [87, 95, 14],
+      [308, 324, 318], [318, 324, 402], [402, 324, 317], [317, 324, 14],
+      [14, 87, 317],
+      // Mouth corners
+      [61, 91, 78], [78, 91, 88], [291, 321, 308], [308, 321, 318],
+      
+      // ===== CHIN & JAW =====
+      // Chin
+      [152, 148, 176], [152, 176, 149], [152, 149, 150], [152, 150, 136],
+      [152, 377, 400], [152, 400, 378], [152, 378, 379], [152, 379, 367],
+      [152, 136, 172], [152, 172, 58], [152, 58, 132],
+      [152, 367, 397], [152, 397, 288], [152, 288, 361],
+      // Lower chin center
+      [152, 175, 199], [152, 199, 200], [152, 200, 421], [152, 421, 396], [152, 396, 175],
+      [175, 171, 152], [396, 391, 152],
+      // Jawline left
+      [132, 58, 172], [172, 58, 138], [138, 58, 135], [135, 58, 169],
+      [169, 58, 170], [170, 58, 140], [140, 58, 171], [171, 58, 175],
+      // Jawline right
+      [361, 288, 397], [397, 288, 367], [367, 288, 364], [364, 288, 394],
+      [394, 288, 395], [395, 288, 369], [369, 288, 391], [391, 288, 396],
+      
+      // ===== FILL INTERIOR REGIONS =====
+      // Between nose and cheeks
+      [102, 64, 48], [331, 294, 278],
+      [117, 118, 100], [346, 347, 329],
+      [118, 119, 101], [347, 348, 330],
+      [119, 120, 100], [348, 349, 329],
+      // Between mouth and nose
+      [92, 165, 167], [322, 391, 393],
+      [167, 164, 37], [393, 392, 267],
+      [37, 72, 39], [267, 302, 269],
+      [39, 73, 40], [269, 303, 270],
+      [40, 74, 185], [270, 304, 409],
+      // Under eyes to cheeks
+      [116, 111, 35], [345, 340, 265],
+      [35, 111, 117], [265, 340, 346],
+      // Additional forehead fill
+      [151, 108, 69], [151, 337, 299],
+      [108, 151, 9], [337, 151, 9],
+      [9, 151, 10], [9, 10, 151],
+      // Nose to forehead connection
+      [6, 122, 168], [6, 351, 168],
+      [196, 122, 3], [419, 351, 248],
+    ];
+
+    // Generate unique face positions for all particles with uniform distribution
+    let facePositions = [];
+    
+    function generateFacePositions() {
+      facePositions = [];
+      const count = cfg.particleCount;
+      
+      // First, add positions at key landmarks with multipliers for emphasis
+      const LANDMARK_WEIGHTS = {
+        // Lips - heavy emphasis
+        61: 4, 146: 3, 91: 3, 181: 3, 84: 3, 17: 4, 314: 3, 405: 3, 321: 3, 375: 3, 291: 4,
+        78: 4, 95: 3, 88: 3, 178: 3, 87: 3, 14: 4, 317: 3, 402: 3, 318: 3, 324: 3, 308: 4,
+        // Eyes - heavy emphasis  
+        33: 4, 133: 4, 159: 3, 145: 3, 263: 4, 362: 4, 386: 3, 374: 3,
+        246: 3, 161: 2, 160: 2, 158: 2, 157: 2, 173: 2, 155: 2, 154: 2, 153: 2,
+        466: 3, 388: 2, 387: 2, 385: 2, 384: 2, 398: 2, 382: 2, 381: 2, 380: 2,
+        // Eyebrows
+        70: 2, 63: 2, 105: 2, 66: 2, 107: 2, 300: 2, 293: 2, 334: 2, 296: 2, 336: 2,
+        // Nose
+        1: 3, 2: 2, 4: 3, 5: 2, 6: 3, 168: 2, 197: 2, 195: 2,
+        // Face outline
+        10: 2, 109: 2, 67: 2, 103: 2, 54: 2, 21: 2, 162: 2, 127: 2, 234: 2, 93: 2, 132: 2,
+        338: 2, 297: 2, 332: 2, 284: 2, 301: 2, 389: 2, 356: 2, 454: 2, 323: 2, 361: 2,
+        // Chin  
+        152: 3, 175: 2, 199: 2, 396: 2,
+        // Jawline
+        58: 2, 172: 2, 136: 2, 150: 2, 149: 2, 148: 2, 176: 2,
+        288: 2, 397: 2, 367: 2, 379: 2, 378: 2, 377: 2, 400: 2
+      };
+      
+      // Add weighted landmarks
+      for (let i = 0; i < LM_COUNT; i++) {
+        const weight = LANDMARK_WEIGHTS[i] || 1;
+        for (let w = 0; w < weight; w++) {
+          facePositions.push({
+            type: 'landmark',
+            lmIndex: i,
+            isHot: EXTRA_HOT.has(i) ? 2 : (HOT.has(i) ? 1 : 0),
+            jitter: w > 0 ? 0.02 : 0 // Slight jitter for duplicates
+          });
+        }
+      }
+      
+      // Calculate remaining positions needed
+      const remaining = count - facePositions.length;
+      
+      // Use improved distribution within triangles
+      // Weight triangles by area (approximated by feature importance)
+      const FEATURE_TRIANGLES = {
+        eyes: { indices: [], weight: 3.0 },
+        lips: { indices: [], weight: 3.5 },
+        nose: { indices: [], weight: 2.0 },
+        cheeks: { indices: [], weight: 1.0 },
+        forehead: { indices: [], weight: 0.8 },
+        chin: { indices: [], weight: 0.9 }
+      };
+      
+      // Categorize triangles (simplified - assign based on landmark ranges)
+      FACE_TRIANGLES.forEach((tri, idx) => {
+        const avgLm = (tri[0] + tri[1] + tri[2]) / 3;
+        const hasEyeLm = tri.some(l => (l >= 33 && l <= 173) || (l >= 263 && l <= 398));
+        const hasLipLm = tri.some(l => (l >= 61 && l <= 95) || (l >= 291 && l <= 324) || l === 0 || l === 13 || l === 14 || l === 17);
+        const hasNoseLm = tri.some(l => [1,2,4,5,6,168,197,195,94,164,122,188,114,217,198,351,412,343,437,420,48,115,220,45,275,281,51,134,363,440,278].includes(l));
+        
+        if (hasLipLm) FEATURE_TRIANGLES.lips.indices.push(idx);
+        else if (hasEyeLm) FEATURE_TRIANGLES.eyes.indices.push(idx);
+        else if (hasNoseLm) FEATURE_TRIANGLES.nose.indices.push(idx);
+        else if (avgLm < 150 || avgLm > 350) FEATURE_TRIANGLES.forehead.indices.push(idx);
+        else FEATURE_TRIANGLES.cheeks.indices.push(idx);
+      });
+      
+      // Calculate points per triangle based on weights
+      let totalWeight = 0;
+      for (const feature of Object.values(FEATURE_TRIANGLES)) {
+        totalWeight += feature.indices.length * feature.weight;
+      }
+      
+      // Distribute remaining points
+      let distributed = 0;
+      for (const feature of Object.values(FEATURE_TRIANGLES)) {
+        for (const triIdx of feature.indices) {
+          const tri = FACE_TRIANGLES[triIdx];
+          const pointsForTri = Math.ceil((feature.weight / totalWeight) * remaining * feature.indices.length / feature.indices.length);
+          const [i1, i2, i3] = tri;
+          const isHotTri = (HOT.has(i1) || HOT.has(i2) || HOT.has(i3)) ? 1 : 0;
+          const isExtraHot = (EXTRA_HOT.has(i1) || EXTRA_HOT.has(i2) || EXTRA_HOT.has(i3)) ? 2 : isHotTri;
+          
+          // Use Halton sequence for more uniform distribution
+          for (let j = 0; j < pointsForTri && facePositions.length < count; j++) {
+            // More uniform barycentric sampling
+            const r1 = Math.random();
+            const r2 = Math.random();
+            const sqrtR1 = Math.sqrt(r1);
+            const u = 1 - sqrtR1;
+            const v = sqrtR1 * (1 - r2);
+            const w = sqrtR1 * r2;
+            
+            facePositions.push({
+              type: 'interpolated',
+              lm1: i1, lm2: i2, lm3: i3,
+              u, v, w,
+              isHot: isExtraHot,
+              jitter: 0
+            });
+            distributed++;
+          }
+        }
+      }
+      
+      // Fill any remaining with uniform distribution across all triangles
+      while (facePositions.length < count) {
+        const triIdx = Math.floor(Math.random() * FACE_TRIANGLES.length);
+        const tri = FACE_TRIANGLES[triIdx];
+        const [i1, i2, i3] = tri;
+        
+        const r1 = Math.random();
+        const r2 = Math.random();
+        const sqrtR1 = Math.sqrt(r1);
+        const u = 1 - sqrtR1;
+        const v = sqrtR1 * (1 - r2);
+        const w = sqrtR1 * r2;
+        
+        facePositions.push({
+          type: 'interpolated',
+          lm1: i1, lm2: i2, lm3: i3,
+          u, v, w,
+          isHot: (HOT.has(i1) || HOT.has(i2) || HOT.has(i3)) ? 1 : 0,
+          jitter: 0
+        });
+      }
+      
+      // Shuffle to avoid patterns
+      for (let i = facePositions.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [facePositions[i], facePositions[j]] = [facePositions[j], facePositions[i]];
+      }
+    }
+        
+    // --- Particles
+    const particles = [];
+    function initParticles(){
+      particles.length = 0;
+      const count = cfg.particleCount;
+      const R = Math.min(W,H) * cfg.sphereRadiusFrac;
+
+      generateFacePositions();
+
+      for (let i=0;i<count;i++){
+        // Fibonacci sphere for globe
+        const phi = Math.acos(1 - 2 * (i + 0.5) / count);
+        const theta = Math.PI * (1 + Math.sqrt(5)) * i;
+        const x = R * Math.sin(phi) * Math.cos(theta);
+        const y = R * Math.sin(phi) * Math.sin(theta);
+        const z = R * Math.cos(phi);
+
+        const facePos = facePositions[i];
+
+        // Random seeds for oscillation and dispersion effects
+        const seed1 = Math.random() * Math.PI * 2;
+        const seed2 = Math.random() * Math.PI * 2;
+        const seed3 = Math.random() * Math.PI * 2;
+        const disperseAngle = Math.random() * Math.PI * 2;
+        const disperseDist = 0.5 + Math.random() * 0.5;
+
+        particles.push({
+          baseX:x, baseY:y, baseZ:z,
+          x:x, y:y, z:z,
+          facePos,
+          size: cfg.dotMin + Math.random()*(cfg.dotMax-cfg.dotMin),
+          alpha: 0.30 + Math.random()*0.70,
+          // Oscillation seeds
+          oscSeed1: seed1,
+          oscSeed2: seed2,
+          oscSeed3: seed3,
+          // Dispersion direction
+          disperseAngle: disperseAngle,
+          disperseDist: disperseDist
+        });
+      }
+    }
+
+    // Compute face bounds
+    function computeFaceBounds(lm){
+      let minX=1, maxX=0, minY=1, maxY=0;
+      for (let i=0;i<LM_COUNT;i++){
+        const p = lm[i];
+        if (!p) continue;
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+        minY = Math.min(minY, p.y);
+        maxY = Math.max(maxY, p.y);
+      }
+      return {minX,maxX,minY,maxY, w:(maxX-minX), h:(maxY-minY), cx:(minX+maxX)/2, cy:(minY+maxY)/2};
+    }
+
+    let neutralCenter = {x:0.5, y:0.5};
+    let neutralRot = {yaw:0, pitch:0, roll:0};
+
+    function estimateRotation(lm){
+      const L = lm[234] || lm[33];
+      const R = lm[454] || lm[263];
+      const N = lm[1]   || lm[4];
+
+      if (!L || !R || !N) return {yaw:0,pitch:0,roll:0};
+
+      const midX = (L.x + R.x) * 0.5;
+      const yaw = (N.x - midX) / Math.max(1e-6, (R.x - L.x));
+
+      const midY = (L.y + R.y) * 0.5;
+      const pitch = (N.y - midY) / Math.max(1e-6, (R.x - L.x));
+
+      const roll = Math.atan2((R.y - L.y), (R.x - L.x));
+
+      return {yaw, pitch, roll};
+    }
+
+    // Convert landmark to screen coordinates with proper aspect ratio
+    function faceTarget(lm, faceInfo, rot){
+      const x = 1 - lm.x;
+      const y = lm.y;
+
+      const dx = (x - neutralCenter.x);
+      const dy = (y - neutralCenter.y);
+
+      // Normalize by face dimensions for proper aspect ratio
+      const nx = dx / Math.max(1e-6, faceInfo.w);
+      const ny = dy / Math.max(1e-6, faceInfo.h);
+
+      const baseSize = Math.min(W, H) * cfg.faceWidthFrac * cfg.facePad;
+      
+      // Calculate corrected face aspect ratio
+      const faceAspect = faceInfo.w / Math.max(1e-6, faceInfo.h);
+      const correctedAspect = faceAspect * videoAspect;
+      
+      let faceW, faceH;
+      if (correctedAspect > 1) {
+        faceW = baseSize;
+        faceH = baseSize / correctedAspect;
+      } else {
+        faceH = baseSize;
+        faceW = baseSize * correctedAspect;
+      }
+
+      let px = nx * faceW;
+      let py = ny * faceH;
+
+      const yaw = rot.yaw * cfg.rotAmount;
+      const pitch = rot.pitch * cfg.rotAmount;
+      const roll = rot.roll * cfg.rotAmount * 0.35;
+
+      px += yaw * faceW * 0.06;
+      py += pitch * faceH * 0.05;
+
+      const cos = Math.cos(roll), sin = Math.sin(roll);
+      const rx = px*cos - py*sin;
+      const ry = px*sin + py*cos;
+      px = rx; py = ry;
+
+      const z = (lm.z ?? 0);
+      const pz = z * (Math.min(W,H) * 0.75);
+
+      return {x:px, y:py, z:pz};
+    }
+
+    function clear(){
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0,0,W,H);
+
+      const r = Math.min(W,H)*0.60;
+      const g = ctx.createRadialGradient(CX, CY, r*0.08, CX, CY, r);
+      g.addColorStop(0, 'rgba(40,140,255,0.07)');
+      g.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+    }
+
+    function drawDot(x, y, r, alpha, hotBoost){
+      // Outer glow
+      const glowSize = r * 3.5;
+      const glow = ctx.createRadialGradient(x, y, 0, x, y, glowSize);
+      const glowAlpha = alpha * 0.4 * hotBoost;
+      glow.addColorStop(0, `rgba(100,200,255,${glowAlpha})`);
+      glow.addColorStop(0.3, `rgba(80,180,255,${glowAlpha * 0.5})`);
+      glow.addColorStop(1, 'rgba(50,150,255,0)');
+      ctx.beginPath();
+      ctx.arc(x, y, glowSize, 0, Math.PI * 2);
+      ctx.fillStyle = glow;
+      ctx.fill();
+      
+      // Core particle
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(180,240,255,${alpha})`;
+      ctx.fill();
+    }
+
+    function step(){
+      clear();
+
+      const now = performance.now();
+      const dt = (now - lastPhaseUpdate) / 1000;
+      lastPhaseUpdate = now;
+
+      // Determine transition phase and update chaos/disperse amounts
+      const wasInFace = faceBlend > 0.5;
+      
+      if (hasFace && lastLandmarks) {
+        // Transitioning TO face
+        if (faceBlend < 0.1 && transitionPhase !== 'oscillate') {
+          // Just started detecting face - begin oscillation phase
+          transitionPhase = 'oscillate';
+        }
+        
+        if (transitionPhase === 'oscillate') {
+          // Build up chaos/oscillation
+          chaosAmount = Math.min(MAX_CHAOS, chaosAmount + CHAOS_BUILD_SPEED);
+          
+          // Once chaos is high enough, start blending to face
+          if (chaosAmount > 0.6) {
+            faceBlend = Math.min(1, faceBlend + BLEND_IN * 0.5);
+          }
+          
+          // Transition to forming phase once blend starts
+          if (faceBlend > 0.3) {
+            transitionPhase = 'forming';
+          }
+        } else if (transitionPhase === 'forming' || transitionPhase === 'stable') {
+          // Decay chaos while forming face
+          chaosAmount = Math.max(0, chaosAmount - CHAOS_DECAY_SPEED);
+          faceBlend = Math.min(1, faceBlend + BLEND_IN);
+          
+          if (faceBlend >= 0.95 && chaosAmount < 0.05) {
+            transitionPhase = 'stable';
+          }
+        }
+        
+        // Decay any dispersion from previous transition
+        disperseAmount = Math.max(0, disperseAmount - DISPERSE_DECAY_SPEED * 2);
+        
+      } else {
+        // Transitioning BACK to globe
+        if (faceBlend > 0.5 && transitionPhase !== 'disperse') {
+          // Just lost face - begin dispersion phase
+          transitionPhase = 'disperse';
+        }
+        
+        if (transitionPhase === 'disperse') {
+          // Build up dispersion
+          disperseAmount = Math.min(MAX_DISPERSE, disperseAmount + DISPERSE_BUILD_SPEED);
+          
+          // Once dispersed enough, start blending back to globe
+          if (disperseAmount > 0.5) {
+            faceBlend = Math.max(0, faceBlend - BLEND_OUT * 0.6);
+          }
+          
+          // Transition to reforming phase
+          if (faceBlend < 0.4) {
+            transitionPhase = 'reforming';
+          }
+        } else if (transitionPhase === 'reforming' || transitionPhase === 'stable') {
+          // Decay dispersion while returning to globe
+          disperseAmount = Math.max(0, disperseAmount - DISPERSE_DECAY_SPEED);
+          faceBlend = Math.max(0, faceBlend - BLEND_OUT);
+          
+          if (faceBlend <= 0.05 && disperseAmount < 0.05) {
+            transitionPhase = 'stable';
+          }
+        }
+        
+        // Decay any chaos from previous transition
+        chaosAmount = Math.max(0, chaosAmount - CHAOS_DECAY_SPEED * 2);
+      }
+
+      const time = performance.now() * 0.001 * cfg.rotationSpeed;
+      const oscTime = performance.now() * 0.001;
+      const R = Math.min(W,H) * cfg.sphereRadiusFrac;
+      const persp = cfg.perspective;
+
+      let faceInfo = null;
+      let rot = {yaw:0,pitch:0,roll:0};
+
+      if (lastLandmarks && faceBlend > 0.001){
+        faceInfo = computeFaceBounds(lastLandmarks);
+
+        const curCenter = { x: 1 - faceInfo.cx, y: faceInfo.cy };
+        neutralCenter.x += (curCenter.x - neutralCenter.x) * cfg.centerSmoothing;
+        neutralCenter.y += (curCenter.y - neutralCenter.y) * cfg.centerSmoothing;
+
+        const r0 = estimateRotation(lastLandmarks);
+        neutralRot.yaw   += (r0.yaw   - neutralRot.yaw)   * cfg.rotSmoothing;
+        neutralRot.pitch += (r0.pitch - neutralRot.pitch) * cfg.rotSmoothing;
+        neutralRot.roll  += (r0.roll  - neutralRot.roll)  * cfg.rotSmoothing;
+        rot = neutralRot;
+      }
+
+      ctx.globalCompositeOperation = 'lighter';
+
+      for (const p of particles){
+        const bx = p.baseX, by = p.baseY, bz = p.baseZ;
+        const gx = bx * Math.cos(time) - bz * Math.sin(time);
+        const gz = bx * Math.sin(time) + bz * Math.cos(time);
+        const gy = by;
+
+        let fx=gx, fy=gy, fz=gz;
+        let hotBoost = 1.0;
+
+        if (faceInfo && faceBlend > 0.001 && p.facePos){
+          const fp = p.facePos;
+          let targetPt = null;
+          const jitter = fp.jitter || 0;
+          
+          if (fp.type === 'landmark') {
+            const lm = lastLandmarks[fp.lmIndex];
+            if (lm) {
+              targetPt = faceTarget(lm, faceInfo, rot);
+              // Apply slight jitter for duplicate landmarks
+              if (jitter > 0) {
+                targetPt.x += (Math.random() - 0.5) * jitter * Math.min(W, H) * cfg.faceWidthFrac;
+                targetPt.y += (Math.random() - 0.5) * jitter * Math.min(W, H) * cfg.faceWidthFrac;
+              }
+              hotBoost = fp.isHot === 2 ? 1.45 : (fp.isHot === 1 ? 1.20 : 1.0);
+            }
+          } else if (fp.type === 'interpolated') {
+            const lm1 = lastLandmarks[fp.lm1];
+            const lm2 = lastLandmarks[fp.lm2];
+            const lm3 = lastLandmarks[fp.lm3];
+            if (lm1 && lm2 && lm3) {
+              const t1 = faceTarget(lm1, faceInfo, rot);
+              const t2 = faceTarget(lm2, faceInfo, rot);
+              const t3 = faceTarget(lm3, faceInfo, rot);
+              targetPt = {
+                x: fp.u * t1.x + fp.v * t2.x + fp.w * t3.x,
+                y: fp.u * t1.y + fp.v * t2.y + fp.w * t3.y,
+                z: fp.u * t1.z + fp.v * t2.z + fp.w * t3.z
+              };
+              hotBoost = fp.isHot === 2 ? 1.35 : (fp.isHot === 1 ? 1.15 : 1.0);
+            }
+          }
+          
+          if (targetPt) {
+            fx = targetPt.x;
+            fy = targetPt.y;
+            fz = targetPt.z;
+            fz -= R * 0.22;
+          }
+        }
+
+        // Base interpolated position
+        let tx = gx + (fx - gx) * faceBlend;
+        let ty = gy + (fy - gy) * faceBlend;
+        let tz = gz + (fz - gz) * faceBlend;
+
+        // Add oscillation effect (VIGOROUS shaking before forming face)
+        if (chaosAmount > 0.01) {
+          const oscIntensity = chaosAmount * chaosAmount * chaosAmount; // Cubic easing for more punch
+          const freq1 = OSCILLATION_FREQ + p.oscSeed1 * 5;
+          const freq2 = OSCILLATION_FREQ * 1.5 + p.oscSeed2 * 4;
+          const freq3 = OSCILLATION_FREQ * 0.8 + p.oscSeed3 * 6;
+          
+          // Multiple overlapping frequencies for chaotic motion
+          const oscX = (Math.sin(oscTime * freq1 + p.oscSeed1 * 10) + 
+                        Math.sin(oscTime * freq1 * 2.3 + p.oscSeed2 * 7) * 0.5) * OSCILLATION_AMP * oscIntensity;
+          const oscY = (Math.sin(oscTime * freq2 + p.oscSeed2 * 10) + 
+                        Math.sin(oscTime * freq2 * 1.7 + p.oscSeed3 * 8) * 0.5) * OSCILLATION_AMP * oscIntensity;
+          const oscZ = (Math.sin(oscTime * freq3 + p.oscSeed3 * 10) + 
+                        Math.sin(oscTime * freq3 * 2.1 + p.oscSeed1 * 9) * 0.4) * OSCILLATION_AMP * 0.7 * oscIntensity;
+          
+          tx += oscX;
+          ty += oscY;
+          tz += oscZ;
+        }
+
+        // Add dispersion effect (EXPLOSIVE scatter before returning to globe)
+        if (disperseAmount > 0.01) {
+          const dispIntensity = disperseAmount * disperseAmount * disperseAmount; // Cubic for explosive feel
+          const dispX = Math.cos(p.disperseAngle) * DISPERSE_RADIUS * p.disperseDist * dispIntensity;
+          const dispY = Math.sin(p.disperseAngle) * DISPERSE_RADIUS * p.disperseDist * dispIntensity;
+          const dispZ = (Math.sin(p.oscSeed1 * 5) - 0.3) * DISPERSE_RADIUS * 0.8 * dispIntensity;
+          
+          // Aggressive swirl motion during dispersion
+          const swirlTime = oscTime * 4;
+          const swirlRadius = 60 * dispIntensity;
+          const swirlX = Math.sin(swirlTime + p.oscSeed2 * 6) * swirlRadius;
+          const swirlY = Math.cos(swirlTime + p.oscSeed3 * 6) * swirlRadius;
+          
+          // Extra chaos during dispersion
+          const chaosX = Math.sin(oscTime * 15 + p.oscSeed1 * 20) * 40 * dispIntensity;
+          const chaosY = Math.cos(oscTime * 13 + p.oscSeed2 * 20) * 40 * dispIntensity;
+          
+          tx += dispX + swirlX + chaosX;
+          ty += dispY + swirlY + chaosY;
+          tz += dispZ;
+        }
+
+        const follow = cfg.follow + (faceBlend > 0.2 ? cfg.followFaceBoost : 0);
+        p.x += (tx - p.x) * follow;
+        p.y += (ty - p.y) * follow;
+        p.z += (tz - p.z) * follow;
+
+        const scale = persp / (persp + p.z);
+        if (scale <= 0) continue;
+
+        const sx = CX + p.x * scale;
+        const sy = CY + p.y * scale;
+
+        const depth = Math.max(0, Math.min(1, (scale - 0.55) * 1.8));
+        const baseA = p.alpha * (0.20 + depth*0.90);
+
+        const a = Math.min(1, baseA * (1.0 + faceBlend * 1.05 * hotBoost));
+
+        const rad = (p.size * scale) * (0.42 + depth*0.70);
+
+        drawDot(sx, sy, rad, a, hotBoost);
+      }
+
+      ctx.globalCompositeOperation = 'source-over';
+
+      // No HUD - clean particle view only
+
+      requestAnimationFrame(step);
+    }
+
+    async function stopStream(){
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; }
+      video.srcObject = null;
+    }
+
+    async function startCamera(){
+      const secureOk = (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+      if(!secureOk){
+        setBadge("Camera blocked: use HTTPS or http://localhost (not file://).", true);
+        return false;
+      }
+      if(!navigator.mediaDevices?.getUserMedia){
+        setBadge("getUserMedia not supported.", true);
+        return false;
+      }
+
+      await stopStream();
+      try{
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio:false,
+          video:{ facingMode:{ ideal: facingMode }, width:{ ideal:1280 }, height:{ ideal:720 } }
+        });
+        video.srcObject = stream;
+        await video.play();
+        return true;
+      }catch(err){
+        console.error(err);
+        return false;
+      }
+    }
+
+    function initFaceMesh(){
+      if(typeof FaceMesh === "undefined"){
+        console.error("FaceMesh not loaded");
+        return false;
+      }
+
+      faceMesh = new FaceMesh({
+        locateFile: (file)=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+      });
+
+      faceMesh.setOptions({
+        maxNumFaces: 1,
+        refineLandmarks: true,
+        minDetectionConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+
+      faceMesh.onResults((res)=>{
+        const found = res.multiFaceLandmarks && res.multiFaceLandmarks.length > 0;
+        hasFace = !!found;
+        if(found){
+          lastLandmarks = res.multiFaceLandmarks[0];
+          lastSeen = performance.now();
+        }
+      });
+
+      return true;
+    }
+
+    let sending = false;
+    async function feed(){
+      if(video.readyState >= 2 && faceMesh && !sending){
+        sending = true;
+        try { await faceMesh.send({ image: video }); }
+        catch(e){ console.error(e); }
+        finally { sending = false; }
+      }
+      requestAnimationFrame(feed);
+    }
+
+    (async ()=>{
+      resize();
+      initParticles();
+      initFaceMesh();
+      await startCamera();
+      step();
+      feed();
+    })();
+  })();
+  </script>
+</body>
+</html>
