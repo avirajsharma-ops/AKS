@@ -23,6 +23,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.aks.app.service.MicForegroundService
+import com.aks.app.service.NativeSpeechRecognizer
 import com.aks.app.service.WatchdogScheduler
 import com.aks.app.utils.EventBus
 import org.json.JSONObject
@@ -59,6 +60,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var errorText: android.widget.TextView
     private var permissionsRequested = false
     private var hasLoadedSuccessfully = false
+    
+    // Native speech recognition
+    private var speechRecognizer: NativeSpeechRecognizer? = null
+    private var isNativeTranscriptionEnabled = true
     
     // Required permissions
     private val requiredPermissions = mutableListOf(
@@ -112,8 +117,18 @@ class MainActivity : AppCompatActivity() {
             runOnUiThread { sendToWeb(type, payload) }
         }
         
+        // Initialize native speech recognizer
+        initializeSpeechRecognizer()
+        
         // Request all permissions on first launch
         requestAllPermissions()
+    }
+    
+    private fun initializeSpeechRecognizer() {
+        speechRecognizer = NativeSpeechRecognizer(this).apply {
+            initialize()
+        }
+        Log.d(TAG, "Native speech recognizer initialized")
     }
     
     private fun requestAllPermissions() {
@@ -413,17 +428,24 @@ class MainActivity : AppCompatActivity() {
                 window.isNativeAKSApp = true;
                 window.isNativeMiraApp = true;
                 window.nativeAppVersion = '1.0.0';
+                window.hasNativeTranscription = true;
+                
+                // Check if native transcription is available
+                if (window.AndroidBridge && window.AndroidBridge.isNativeTranscriptionAvailable) {
+                    window.hasNativeTranscription = window.AndroidBridge.isNativeTranscriptionAvailable();
+                }
                 
                 window.dispatchEvent(new CustomEvent('nativeAppReady', {
                     detail: {
                         platform: 'android',
                         version: '1.0.0',
                         hasMicService: true,
+                        hasNativeTranscription: window.hasNativeTranscription,
                         appName: 'AKS'
                     }
                 }));
                 
-                console.log('AKS native app detected');
+                console.log('AKS native app detected with native transcription: ' + window.hasNativeTranscription);
             })();
         """.trimIndent()
         
@@ -523,6 +545,45 @@ class MainActivity : AppCompatActivity() {
         }
         
         @JavascriptInterface
+        fun startNativeTranscription() {
+            Log.d(TAG, "JS called: startNativeTranscription")
+            runOnUiThread {
+                if (isNativeTranscriptionEnabled && hasMicPermission()) {
+                    speechRecognizer?.startListening()
+                }
+            }
+        }
+        
+        @JavascriptInterface
+        fun stopNativeTranscription() {
+            Log.d(TAG, "JS called: stopNativeTranscription")
+            runOnUiThread {
+                speechRecognizer?.stopListening()
+            }
+        }
+        
+        @JavascriptInterface
+        fun pauseNativeTranscription() {
+            Log.d(TAG, "JS called: pauseNativeTranscription - AI is speaking")
+            runOnUiThread {
+                speechRecognizer?.pauseListening()
+            }
+        }
+        
+        @JavascriptInterface
+        fun resumeNativeTranscription() {
+            Log.d(TAG, "JS called: resumeNativeTranscription - AI stopped speaking")
+            runOnUiThread {
+                speechRecognizer?.resumeListening()
+            }
+        }
+        
+        @JavascriptInterface
+        fun isNativeTranscriptionAvailable(): Boolean {
+            return isNativeTranscriptionEnabled && android.speech.SpeechRecognizer.isRecognitionAvailable(this@MainActivity)
+        }
+        
+        @JavascriptInterface
         fun log(message: String) {
             Log.d("WebView-JS", message)
         }
@@ -585,6 +646,8 @@ class MainActivity : AppCompatActivity() {
     }
     
     override fun onDestroy() {
+        speechRecognizer?.destroy()
+        speechRecognizer = null
         EventBus.destroy(this)
         webView.destroy()
         super.onDestroy()

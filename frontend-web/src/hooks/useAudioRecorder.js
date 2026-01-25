@@ -2,9 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import wsService from '../services/websocket';
 
 /**
- * Native Web Speech API hook with auto language detection
- * Uses browser's built-in speech recognition for reliable, real-time transcription
- * Supports Hindi, English, and mixed language (Hinglish)
+ * Audio Recorder Hook
+ * 
+ * When running in native Android app: Uses ONLY native transcription (no WebView mic)
+ * When running in browser: Uses Web Speech API
  */
 export function useAudioRecorder() {
   const [isListening, setIsListening] = useState(false);
@@ -13,13 +14,121 @@ export function useAudioRecorder() {
   const [interimTranscript, setInterimTranscript] = useState('');
   const [error, setError] = useState(null);
   const [aiResponse, setAiResponse] = useState(null);
-  const [detectedLanguage, setDetectedLanguage] = useState('auto'); // Track detected language
+  const [detectedLanguage, setDetectedLanguage] = useState('auto');
+  const [useNativeTranscription, setUseNativeTranscription] = useState(false);
   
   const recognitionRef = useRef(null);
   const autoStartedRef = useRef(false);
   const restartTimeoutRef = useRef(null);
-  const isListeningRef = useRef(false); // Track listening state for callbacks
-  const autoFinalizeTimeoutRef = useRef(null); // Timer to auto-finalize interim text
+  const isListeningRef = useRef(false);
+  const autoFinalizeTimeoutRef = useRef(null);
+  const isNativeAppRef = useRef(false);
+
+  // Check if running in native Android app
+  const checkIsNativeApp = useCallback(() => {
+    if (typeof window !== 'undefined') {
+      return window.isNativeAKSApp === true || window.isNativeMiraApp === true;
+    }
+    return false;
+  }, []);
+
+  // Initialize native app detection on mount
+  useEffect(() => {
+    const isNative = checkIsNativeApp();
+    isNativeAppRef.current = isNative;
+    setUseNativeTranscription(isNative);
+    
+    if (isNative) {
+      console.log('📱 Running in native Android app - WebView mic DISABLED');
+      console.log('📱 All transcription will come from native Android SpeechRecognizer');
+    }
+    
+    // Also listen for late native app detection
+    const handleNativeAppReady = (event) => {
+      console.log('📱 Native app ready event received');
+      isNativeAppRef.current = true;
+      setUseNativeTranscription(true);
+      
+      // If we were trying to listen with WebView, stop it
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+          recognitionRef.current = null;
+        } catch (e) {}
+      }
+    };
+    
+    window.addEventListener('nativeAppReady', handleNativeAppReady);
+    return () => window.removeEventListener('nativeAppReady', handleNativeAppReady);
+  }, [checkIsNativeApp]);
+
+  // Setup native transcription event handler
+  useEffect(() => {
+    if (!isNativeAppRef.current && !checkIsNativeApp()) return;
+    
+    console.log('📱 Setting up native transcription handler');
+    
+    // Store original handler
+    const originalHandler = window.onNativeEvent;
+    
+    // Override with our handler
+    window.onNativeEvent = (type, payload) => {
+      // Call original handler first
+      if (originalHandler && typeof originalHandler === 'function') {
+        try {
+          originalHandler(type, payload);
+        } catch (e) {}
+      }
+      
+      // Handle transcription events from native Android
+      if (type === 'NATIVE_TRANSCRIPT') {
+        const { transcript: text, isFinal, timestamp } = payload || {};
+        
+        if (!text) return;
+        
+        if (isFinal) {
+          console.log('📱 Native FINAL transcript:', text);
+          setTranscript(prev => (prev + ' ' + text.trim()).trim());
+          setInterimTranscript('');
+          
+          // Send directly to backend via WebSocket
+          if (wsService.isConnected) {
+            wsService.send({
+              type: 'transcript',
+              text: text.trim(),
+              language: 'en-IN',
+              isFinal: true,
+              fromNative: true,
+              timestamp: timestamp || Date.now()
+            });
+          }
+        } else {
+          console.log('📱 Native interim transcript:', text);
+          setInterimTranscript(text);
+          
+          // Send user_speaking signal
+          if (wsService.isConnected) {
+            wsService.send({
+              type: 'user_speaking',
+              interim: text,
+              fromNative: true,
+              timestamp: timestamp || Date.now()
+            });
+          }
+        }
+      } else if (type === 'SPEECH_READY' || type === 'SPEECH_STARTED') {
+        setIsListening(true);
+      } else if (type === 'MONITORING_STARTED') {
+        setIsListening(true);
+      } else if (type === 'MONITORING_STOPPED') {
+        setIsListening(false);
+      }
+    };
+    
+    return () => {
+      window.onNativeEvent = originalHandler;
+    };
+  }, [checkIsNativeApp]);
 
   // Check if Web Speech API is supported
   const isSupported = useCallback(() => {
@@ -55,6 +164,15 @@ export function useAudioRecorder() {
     if (isPausedRef.current) return;
     isPausedRef.current = true;
     
+    // If in native app, tell native to pause
+    if (isNativeAppRef.current || checkIsNativeApp()) {
+      if (window.AndroidBridge && window.AndroidBridge.pauseNativeTranscription) {
+        window.AndroidBridge.pauseNativeTranscription();
+        console.log('📱 Paused native transcription (AI speaking)');
+      }
+      return;
+    }
+    
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -63,24 +181,32 @@ export function useAudioRecorder() {
         // Ignore errors
       }
     }
-  }, []);
+  }, [checkIsNativeApp]);
 
   // Resume listening (after AI finishes speaking)
   const resumeListening = useCallback(() => {
     if (!isPausedRef.current) return;
     isPausedRef.current = false;
     
-    // Only resume if we were listening before
+    // If in native app, tell native to resume
+    if (isNativeAppRef.current || checkIsNativeApp()) {
+      if (window.AndroidBridge && window.AndroidBridge.resumeNativeTranscription) {
+        window.AndroidBridge.resumeNativeTranscription();
+        console.log('📱 Resumed native transcription (AI finished)');
+      }
+      return;
+    }
+    
+    // Only resume WebView recognition if we were listening before
     if (isListeningRef.current && recognitionRef.current) {
       try {
         recognitionRef.current.start();
         console.log('▶️ Resumed listening (AI finished)');
       } catch (e) {
-        // May need to recreate recognition
         console.log('🔄 Recreating recognition after pause...');
       }
     }
-  }, []);
+  }, [checkIsNativeApp]);
 
   // Stop listening
   const stopListening = useCallback(() => {
@@ -97,6 +223,15 @@ export function useAudioRecorder() {
       autoFinalizeTimeoutRef.current = null;
     }
     
+    // If in native app, tell native to stop
+    if (isNativeAppRef.current || checkIsNativeApp()) {
+      if (window.AndroidBridge && window.AndroidBridge.stopNativeTranscription) {
+        window.AndroidBridge.stopNativeTranscription();
+        console.log('📱 Stopped native transcription');
+      }
+    }
+    
+    // Also stop WebView recognition if it exists
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
@@ -108,7 +243,7 @@ export function useAudioRecorder() {
     
     setIsListening(false);
     console.log('🛑 Stopped listening');
-  }, []);
+  }, [checkIsNativeApp]);
 
   // Connect to WebSocket
   const connect = useCallback(async () => {
@@ -153,7 +288,25 @@ export function useAudioRecorder() {
     if (isListeningRef.current) return;
     
     try {
-      console.log('🎤 Starting native speech recognition (auto language detection)...');
+      // If in native Android app, DO NOT use WebView speech recognition at all!
+      if (isNativeAppRef.current || checkIsNativeApp()) {
+        console.log('📱 Native app detected - NOT starting WebView speech recognition');
+        console.log('📱 Transcription handled entirely by native Android SpeechRecognizer');
+        
+        isListeningRef.current = true;
+        setIsListening(true);
+        setError(null);
+        
+        // Tell native app to start transcription
+        if (window.AndroidBridge && window.AndroidBridge.startNativeTranscription) {
+          window.AndroidBridge.startNativeTranscription();
+        }
+        
+        return; // EXIT - do not initialize WebView speech recognition!
+      }
+      
+      // Only use WebView's Web Speech API if NOT in native app (browser only)
+      console.log('🌐 Browser detected - using Web Speech API');
       
       const recognition = initRecognition();
       if (!recognition) return;
@@ -389,7 +542,7 @@ export function useAudioRecorder() {
       setError(err.message);
       isListeningRef.current = false;
     }
-  }, [initRecognition, detectLanguageFromText]);
+  }, [initRecognition, detectLanguageFromText, checkIsNativeApp]);
 
   // Toggle listening
   const toggleListening = useCallback(() => {
@@ -490,6 +643,7 @@ export function useAudioRecorder() {
     error,
     aiResponse,
     detectedLanguage,
+    useNativeTranscription,
     connect,
     disconnect,
     startListening,
