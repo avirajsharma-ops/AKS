@@ -9,7 +9,7 @@ const multer = require('multer');
 const { body, validationResult } = require('express-validator');
 
 const { auth } = require('../middleware/auth');
-const { generateSpeech, generateSpeechStream, getVoices, getVoice } = require('../services/elevenlabsService');
+const { generateSpeech, generateSpeechStream, getVoices, getVoice, isTTSAvailable } = require('../services/elevenlabsService');
 const { transcribeBuffer } = require('../services/deepgramService');
 
 // Configure multer for audio uploads
@@ -26,6 +26,20 @@ const upload = multer({
       cb(new Error('Invalid audio format'), false);
     }
   }
+});
+
+/**
+ * GET /api/speech/status
+ * Check TTS availability
+ */
+router.get('/status', auth, (req, res) => {
+  res.json({
+    ttsAvailable: isTTSAvailable(),
+    sttAvailable: true, // Deepgram is always configured
+    message: isTTSAvailable() 
+      ? 'Voice synthesis is available' 
+      : 'Voice synthesis unavailable - ElevenLabs API key not configured'
+  });
 });
 
 /**

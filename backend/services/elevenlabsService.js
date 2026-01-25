@@ -3,31 +3,65 @@
  * Text-to-Speech using ElevenLabs API
  */
 
-const { ElevenLabsClient } = require('elevenlabs');
 const { Readable } = require('stream');
 
-// Initialize client
-const elevenlabs = new ElevenLabsClient({
-  apiKey: process.env.ELEVENLABS_API_KEY
-});
+// Check if API key is available
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+let elevenlabs = null;
+let isAvailable = false;
 
-// Default voice settings
-const DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM';
+if (ELEVENLABS_API_KEY && ELEVENLABS_API_KEY.trim() !== '') {
+  try {
+    const { ElevenLabsClient } = require('elevenlabs');
+    elevenlabs = new ElevenLabsClient({
+      apiKey: ELEVENLABS_API_KEY
+    });
+    isAvailable = true;
+    console.log('✅ ElevenLabs TTS initialized');
+  } catch (err) {
+    console.log('⚠️ ElevenLabs SDK not available, TTS disabled');
+  }
+} else {
+  console.log('⚠️ ElevenLabs API key not set, TTS disabled');
+}
+
+// Default voice ID from environment (required if using TTS)
+const DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
+
+if (!DEFAULT_VOICE_ID && isAvailable) {
+  console.warn('⚠️ ELEVENLABS_VOICE_ID not set in environment');
+}
+
+/**
+ * Check if TTS is available
+ * @returns {boolean}
+ */
+function isTTSAvailable() {
+  return isAvailable && elevenlabs !== null && DEFAULT_VOICE_ID;
+}
 
 /**
  * Generate speech audio from text
  * @param {string} text - Text to convert to speech
  * @param {Object} options - TTS options
- * @returns {Promise<Buffer>} - Audio buffer (MP3)
+ * @returns {Promise<Buffer|null>} - Audio buffer (MP3) or null if TTS unavailable
  */
 async function generateSpeech(text, options = {}) {
+  if (!elevenlabs) {
+    return null; // TTS not available
+  }
+
   try {
     const voiceId = options.voiceId || DEFAULT_VOICE_ID;
+    
+    // Log the text being sent to ElevenLabs for debugging
+    console.log('🔊 Sending to ElevenLabs:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
     
     const audio = await elevenlabs.generate({
       voice: voiceId,
       text: text,
-      model_id: options.modelId || 'eleven_monolingual_v1',
+      // Use multilingual_v2 for Hindi/Devanagari support
+      model_id: options.modelId || 'eleven_multilingual_v2',
       voice_settings: {
         stability: options.stability || 0.5,
         similarity_boost: options.similarityBoost || 0.75,
@@ -44,8 +78,8 @@ async function generateSpeech(text, options = {}) {
     
     return Buffer.concat(chunks);
   } catch (error) {
-    console.error('ElevenLabs TTS error:', error);
-    throw error;
+    console.error('ElevenLabs TTS error:', error.message);
+    return null;
   }
 }
 
@@ -181,7 +215,7 @@ async function getSubscriptionInfo() {
  * @returns {Promise<Buffer>}
  */
 async function generateLongSpeech(text, options = {}) {
-  const MAX_CHARS = 5000; // ElevenLabs limit per request
+  const MAX_CHARS = 5001; // ElevenLabs limit per request
   
   if (text.length <= MAX_CHARS) {
     return generateSpeech(text, options);
@@ -223,5 +257,6 @@ module.exports = {
   getVoices,
   getVoice,
   cloneVoice,
-  getSubscriptionInfo
+  getSubscriptionInfo,
+  isTTSAvailable
 };

@@ -44,14 +44,6 @@ tmp/
 temp/
 *.tmp
 
-# Android/React Native
-frontend-android/android/.gradle/
-frontend-android/android/app/build/
-frontend-android/android/build/
-frontend-android/ios/Pods/
-*.keystore
-!debug.keystore
-
 # Web build
 frontend-web/build/
 

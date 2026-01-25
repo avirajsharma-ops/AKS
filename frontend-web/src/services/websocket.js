@@ -15,7 +15,7 @@ class WebSocketService {
 
   connect(token) {
     return new Promise((resolve, reject) => {
-      const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:5000/ws/audio';
+      const wsUrl = process.env.REACT_APP_WS_URL || 'ws://localhost:5001/ws/audio';
       
       this.ws = new WebSocket(`${wsUrl}?token=${token}`);
 
@@ -88,6 +88,12 @@ class WebSocketService {
       case 'audio_response':
         this.emit('audio:response', data);
         break;
+      case 'ai_question':
+        this.emit('ai:question', data);
+        break;
+      case 'profile':
+        this.emit('profile', data);
+        break;
       case 'listening_started':
         this.emit('listening:started', data);
         break;
@@ -99,6 +105,18 @@ class WebSocketService {
         break;
       case 'error':
         this.emit('error', data);
+        break;
+      case 'ai_voice':
+        this.emit('ai:voice', data);
+        break;
+      case 'ai_response':
+        this.emit('ai:response', data);
+        break;
+      case 'mode_change':
+        this.emit('mode:change', data);
+        break;
+      case 'mode_status':
+        this.emit('mode:status', data);
         break;
       default:
         this.emit('message', data);
@@ -133,16 +151,24 @@ class WebSocketService {
     // Return unsubscribe function
     return () => {
       const callbacks = this.listeners.get(event);
-      const index = callbacks.indexOf(callback);
-      if (index > -1) {
-        callbacks.splice(index, 1);
+      if (callbacks) {
+        const index = callbacks.indexOf(callback);
+        if (index > -1) {
+          callbacks.splice(index, 1);
+        }
       }
     };
   }
 
   emit(event, data) {
     const callbacks = this.listeners.get(event) || [];
-    callbacks.forEach(cb => cb(data));
+    callbacks.forEach(cb => {
+      try {
+        cb(data);
+      } catch (err) {
+        console.error('Event handler error:', err);
+      }
+    });
   }
 
   // Pause listening
@@ -168,6 +194,36 @@ class WebSocketService {
   // Get profile
   getProfile() {
     this.sendCommand('get_profile');
+  }
+
+  // Request AI question
+  getQuestion() {
+    this.sendCommand('get_question');
+  }
+
+  // Start conversation mode manually
+  startConversation(text = null) {
+    this.sendCommand('start_conversation', text ? { text } : {});
+  }
+
+  // End conversation mode
+  endConversation() {
+    this.sendCommand('end_conversation');
+  }
+
+  // Get current mode
+  getMode() {
+    this.sendCommand('get_mode');
+  }
+
+  // Generic send method
+  send(data) {
+    const message = JSON.stringify(data);
+    if (this.isConnected && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(message);
+    } else {
+      this.messageQueue.push(message);
+    }
   }
 
   // Disconnect

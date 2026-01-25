@@ -21,7 +21,6 @@ aks-project/
 │   ├── middleware/        # Auth, validation
 │   └── utils/             # Helpers
 ├── frontend-web/          # React PWA (mobile-first)
-├── frontend-android/      # React Native Android app
 ├── docker/                # Docker configuration
 └── docs/                  # Documentation
 ```
@@ -73,19 +72,18 @@ aks-project/
 - All data is encrypted and user-isolated
 - Clear data collection disclosure on registration
 
-## 📱 Mobile Support
+## 📱 Web Support
 
-- **Web:** PWA with service workers for background support
-- **Android:** Native app with foreground service for continuous listening
+- **Web:** Progressive Web App (PWA) with service workers for background support
+- Works on desktop and mobile browsers
 
 ## 🛠 Tech Stack
 
 - **Backend:** Node.js, Express, WebSocket
 - **Database:** MongoDB Atlas with Vector Search
-- **Frontend Web:** React, PWA
-- **Frontend Mobile:** React Native
-- **Speech Recognition:** Deepgram (primary), Web Speech API (fallback)
-- **Text-to-Speech:** ElevenLabs
+- **Frontend:** React PWA
+- **Speech Recognition:** Native Web Speech API (Hindi + English)
+- **Text-to-Speech:** ElevenLabs (multilingual)
 - **AI/Embeddings:** OpenAI, LangChain
 - **Deployment:** Docker
 ## 🔧 API Endpoints
@@ -116,7 +114,7 @@ aks-project/
 - `POST /api/speech/synthesize` - Text-to-speech
 
 ### WebSocket
-- `ws://localhost:5000/ws/audio` - Real-time audio streaming
+- `ws://localhost:5001/ws/audio` - Real-time audio streaming
 
 ## 🐳 Docker Deployment
 
@@ -138,22 +136,8 @@ docker-compose down
 ```
 
 Access the application:
-- Frontend: http://localhost
-- Backend API: http://localhost:5000
-- MongoDB: localhost:27017
-
-## 📱 Android Development
-
-```bash
-cd frontend-android
-npm install
-
-# For Android emulator
-npx react-native run-android
-
-# For physical device (USB debugging enabled)
-npx react-native run-android --deviceId=<device-id>
-```
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:5001
 
 ## 🧪 Environment Variables
 

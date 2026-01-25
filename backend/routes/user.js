@@ -76,15 +76,10 @@ router.patch('/me', auth, [
 
 /**
  * POST /api/users/permissions
+ * PUT /api/users/permissions
  * Update user permissions (requires explicit consent)
  */
-router.post('/permissions', auth, [
-  body('backgroundListening').optional().isBoolean(),
-  body('dataCollection').optional().isBoolean(),
-  body('voiceCloning').optional().isBoolean(),
-  body('shareAnalytics').optional().isBoolean(),
-  body('agreedToTerms').optional().isBoolean()
-], async (req, res) => {
+const updatePermissionsHandler = async (req, res) => {
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -96,21 +91,23 @@ router.post('/permissions', auth, [
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // Handle nested permissions object
+    const permissions = req.body.permissions || req.body;
+
     // Update permissions
     const permissionFields = ['backgroundListening', 'dataCollection', 'voiceCloning', 'shareAnalytics'];
     for (const field of permissionFields) {
-      if (req.body[field] !== undefined) {
-        user.permissions[field] = req.body[field];
+      if (permissions[field] !== undefined) {
+        user.permissions[field] = permissions[field];
       }
     }
 
-    // Update consent
-    if (req.body.agreedToTerms !== undefined) {
-      user.consent.agreedToTerms = req.body.agreedToTerms;
-      if (req.body.agreedToTerms) {
-        user.consent.agreedAt = new Date();
-        user.consent.privacyPolicyVersion = '1.0';
-      }
+    // Update consent - always set to true when permissions are granted
+    const agreedToTerms = permissions.agreedToTerms ?? (permissions.backgroundListening || permissions.dataCollection);
+    if (agreedToTerms) {
+      user.consent.agreedToTerms = true;
+      user.consent.agreedAt = new Date();
+      user.consent.privacyPolicyVersion = '1.0';
     }
 
     await user.save();
@@ -134,7 +131,21 @@ router.post('/permissions', auth, [
     console.error('Permission update error:', error);
     res.status(500).json({ error: 'Failed to update permissions' });
   }
-});
+};
+
+const permissionsValidation = [
+  body('backgroundListening').optional().isBoolean(),
+  body('dataCollection').optional().isBoolean(),
+  body('voiceCloning').optional().isBoolean(),
+  body('shareAnalytics').optional().isBoolean(),
+  body('agreedToTerms').optional().isBoolean(),
+  body('permissions.backgroundListening').optional().isBoolean(),
+  body('permissions.dataCollection').optional().isBoolean(),
+  body('permissions.voiceCloning').optional().isBoolean()
+];
+
+router.post('/permissions', auth, permissionsValidation, updatePermissionsHandler);
+router.put('/permissions', auth, permissionsValidation, updatePermissionsHandler);
 
 /**
  * GET /api/users/permissions
