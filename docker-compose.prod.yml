@@ -1,39 +1,8 @@
 # Production Docker Compose for AKS
-# Ubuntu 24 LTS VPS Deployment
+# Uses MongoDB Atlas (cloud) - no local MongoDB needed
 
 services:
-  # MongoDB Database
-  mongodb:
-    image: mongo:7
-    container_name: aks-mongodb
-    restart: always
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USERNAME:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-akspassword123}
-      MONGO_INITDB_DATABASE: aks
-    volumes:
-      - mongodb_data:/data/db
-      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
-    networks:
-      - aks-network
-    healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
-      interval: 10s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Backend API with PM2 for process management
+  # Backend API
   backend:
     build:
       context: ./backend
@@ -45,12 +14,8 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5001
-      MONGODB_URI: mongodb://${MONGO_USERNAME:-admin}:${MONGO_PASSWORD:-akspassword123}@mongodb:27017/aks?authSource=admin
     expose:
       - "5001"
-    depends_on:
-      mongodb:
-        condition: service_healthy
     networks:
       - aks-network
     healthcheck:
@@ -113,10 +78,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-volumes:
-  mongodb_data:
-    driver: local
 
 networks:
   aks-network:
