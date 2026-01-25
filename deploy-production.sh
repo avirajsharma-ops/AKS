@@ -341,7 +341,7 @@ create_env_file() {
 
 # Create nginx configuration
 create_nginx_config() {
-    log_step "Creating Nginx configuration...""
+    log_step "Creating Nginx configuration..."
     
     mkdir -p "$PROJECT_DIR/nginx"
     
