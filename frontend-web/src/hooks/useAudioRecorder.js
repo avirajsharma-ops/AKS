@@ -201,19 +201,19 @@ export function useAudioRecorder() {
               autoFinalizeTimeoutRef.current = null;
             }
           } else {
-            // Always store the latest interim text
-            lastInterimRef.current = text;
+            // Accumulate interim text
             lastInterimTimestampRef.current = Date.now();
             interimText += text;
           }
         }
         
         if (interimText) {
+          // Store the FULL accumulated interim text
+          lastInterimRef.current = interimText;
           setInterimTranscript(interimText);
           console.log('📝 Interim:', interimText);
           
           // Send "user is speaking" signal to keep conversation alive
-          // This prevents timeout while user is still talking
           if (wsService.isConnected) {
             wsService.send({
               type: 'user_speaking',
