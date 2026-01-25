@@ -562,11 +562,79 @@ class MainActivity : AppCompatActivity() {
                         hasMicPermission: ${hasMicrophonePermission()}
                     }
                 }));
+                
+                // Bridge to pass auth token to native service
+                window.AKSBridge = {
+                    setAuthToken: function(token) {
+                        if (window.AKSNative) {
+                            window.AKSNative.setAuthToken(token);
+                        }
+                    },
+                    pauseMic: function() {
+                        if (window.AKSNative) {
+                            window.AKSNative.pauseMic();
+                        }
+                    },
+                    resumeMic: function() {
+                        if (window.AKSNative) {
+                            window.AKSNative.resumeMic();
+                        }
+                    }
+                };
+                
+                // Auto-extract token from localStorage
+                setTimeout(function() {
+                    var token = localStorage.getItem('accessToken');
+                    if (token && window.AKSBridge) {
+                        window.AKSBridge.setAuthToken(token);
+                    }
+                }, 1000);
+                
                 console.log('AKS Native App bridge initialized');
             })();
         """.trimIndent()
         
         webView.evaluateJavascript(js, null)
+        
+        // Add JavaScript interface
+        webView.addJavascriptInterface(AKSJavaScriptInterface(), "AKSNative")
+    }
+    
+    /**
+     * JavaScript interface for communication from WebView to native
+     */
+    private inner class AKSJavaScriptInterface {
+        @android.webkit.JavascriptInterface
+        fun setAuthToken(token: String) {
+            Log.d(TAG, "Received auth token from WebView")
+            val serviceIntent = Intent(this@MainActivity, MicrophoneService::class.java).apply {
+                action = "SET_TOKEN"
+                putExtra("token", token)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
+        }
+        
+        @android.webkit.JavascriptInterface
+        fun pauseMic() {
+            Log.d(TAG, "Pause mic from WebView")
+            val serviceIntent = Intent(this@MainActivity, MicrophoneService::class.java).apply {
+                action = "PAUSE_RECOGNITION"
+            }
+            startService(serviceIntent)
+        }
+        
+        @android.webkit.JavascriptInterface
+        fun resumeMic() {
+            Log.d(TAG, "Resume mic from WebView")
+            val serviceIntent = Intent(this@MainActivity, MicrophoneService::class.java).apply {
+                action = "RESUME_RECOGNITION"
+            }
+            startService(serviceIntent)
+        }
     }
     
     // ==================== UI State Management ====================

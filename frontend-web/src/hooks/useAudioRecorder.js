@@ -287,12 +287,39 @@ export function useAudioRecorder() {
           isListeningRef.current = false;
           setIsListening(false);
         } else if (event.error === 'no-speech') {
-          // No speech detected, this is normal - will auto-restart
-          console.log('🔄 No speech detected, continuing...');
+          // No speech detected - immediately restart for continuous listening
+          console.log('🔄 No speech detected, restarting immediately...');
+          if (isListeningRef.current && !isPausedRef.current) {
+            try {
+              recognition.start();
+            } catch (e) {
+              // Will handle in onend
+            }
+          }
         } else if (event.error === 'network') {
-          setError('Network error. Please check your connection.');
+          // Network error - retry after short delay
+          console.log('🔄 Network error, retrying...');
+          setTimeout(() => {
+            if (isListeningRef.current && !isPausedRef.current) {
+              try {
+                recognition.start();
+              } catch (e) {
+                // Will handle in onend
+              }
+            }
+          }, 500);
         } else if (event.error === 'aborted') {
-          // User stopped, don't restart
+          // Aborted - restart unless paused
+          if (isListeningRef.current && !isPausedRef.current) {
+            console.log('🔄 Aborted, restarting...');
+            setTimeout(() => {
+              try {
+                recognition.start();
+              } catch (e) {
+                // Will handle in onend
+              }
+            }, 100);
+          }
         }
       };
 
@@ -306,14 +333,26 @@ export function useAudioRecorder() {
           return;
         }
         
-        // Auto-restart if we're still supposed to be listening
+        // Auto-restart IMMEDIATELY if we're still supposed to be listening
         if (isListeningRef.current) {
+          // Use minimal delay to ensure continuous listening
           restartTimeoutRef.current = setTimeout(() => {
-            if (isListeningRef.current && recognitionRef.current && !isPausedRef.current) {
+            if (isListeningRef.current && !isPausedRef.current) {
               try {
                 console.log('🔄 Auto-restarting recognition...');
-                recognitionRef.current.start();
+                if (recognitionRef.current) {
+                  recognitionRef.current.start();
+                } else {
+                  // Create new recognition instance
+                  const newRecognition = initRecognition();
+                  if (newRecognition) {
+                    recognitionRef.current = newRecognition;
+                    setupRecognitionHandlers(newRecognition);
+                    newRecognition.start();
+                  }
+                }
               } catch (e) {
+                console.log('🔄 Start failed, creating new instance...');
                 // Create new recognition instance
                 const newRecognition = initRecognition();
                 if (newRecognition) {
@@ -323,7 +362,7 @@ export function useAudioRecorder() {
                 }
               }
             }
-          }, 100);
+          }, 10); // Minimal delay for continuous listening
         }
       };
 
